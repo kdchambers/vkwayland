@@ -1,0 +1,9 @@
+[submodule "deps/zigimg"]
+	path = deps/zigimg
+	url = https://github.com/zigimg/zigimg
+[submodule "deps/vulkan-zig"]
+	path = deps/vulkan-zig
+	url = https://github.com/Snektron/vulkan-zig
+[submodule "deps/zig-wayland"]
+	path = deps/zig-wayland
+	url = https://github.com/kdchambers/zig-wayland
