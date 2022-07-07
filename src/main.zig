@@ -35,9 +35,9 @@ const xdg = wayland.client.xdg;
 //   1. Options
 //
 
-/// Initial screen dimensions
-/// Will be updated as Wayland reports the real screen size and
-/// user input (Window resizing) occurs
+/// Screen dimensions of the application, as reported by wayland
+/// Initial values are arbirary and will be updated once the wayland
+/// server reports a change
 var screen_dimensions = geometry.Dimensions2D(ScreenPixelBaseType){
     .width = 640,
     .height = 1040,
@@ -2305,7 +2305,6 @@ fn createFramebuffers(allocator: std.mem.Allocator, app: GraphicsContext) ![]vk.
 //   6. Vulkan Util / Wrapper Functions
 //
 
-// TODO: Extract path + data
 fn createFragmentShaderModule(app: GraphicsContext, comptime shader_path: []const u8) !vk.ShaderModule {
     const shader_fragment_spv align(4) = @embedFile(shader_path);
     const create_info = vk.ShaderModuleCreateInfo{
