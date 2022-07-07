@@ -36,6 +36,8 @@ pub fn build(b: *Builder) void {
     });
     exe.step.dependOn(&scanner.step);
 
+    exe.addPackagePath("zigimg", "deps/zigimg/zigimg.zig");
+
     exe.linkLibC();
     exe.linkSystemLibrary("vulkan");
     exe.linkSystemLibrary("wayland-client");

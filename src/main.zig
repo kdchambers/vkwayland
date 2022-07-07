@@ -4,6 +4,7 @@
 const std = @import("std");
 const vk = @import("vulkan");
 const vulkan_config = @import("vulkan_config.zig");
+const img = @import("zigimg");
 
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
@@ -14,6 +15,8 @@ const xdg = wayland.client.xdg;
 // - Audit staging_buffer code
 // - Write a generic shader
 // - Implement fixed pixel sized quads
+// - Reuse buffer when loading icon images
+// - Fix icon_path_list
 
 // ====== Contents ======
 //
@@ -59,23 +62,28 @@ const vulkan_application_version = vk.makeApiVersion(0, 0, 1, 0);
 const application_name = "vkwayland";
 
 /// Enables transparency on the selected surface
-const transparancy_enabled = false;
+const transparancy_enabled = true;
 
 /// The transparency of the selected surface
 /// Valid values between 0.0 (no transparency) and 1.0 (full)
 /// Ignored if `transparancy_enabled` is false
-const transparancy_level = 0.9;
+const transparancy_level = 0.0;
 
 /// Background color of application surface before transparency is applied
-const background_color = graphics.RGB(f32).fromInt(10, 50, 255);
+var background_color = graphics.RGB(f32).fromInt(28, 97, 56);
+var background_color_b = graphics.RGB(f32).fromInt(94, 0, 42);
+
+/// The time in milliseconds for the background color to change
+/// from color a to b
+const background_color_loop_ms: u32 = 1000 * 10;
 
 /// Version of Vulkan to use
 /// https://www.khronos.org/registry/vulkan/
 const vulkan_api_version = vk.API_VERSION_1_3;
 
 /// How many times the main loop should check for updates per second
-/// NOTE: This does not refer to how many times the screen is drawn to. That is driven by the 
-///       `frameListener` callback that the wayland compositor will trigger when it's ready for 
+/// NOTE: This does not refer to how many times the screen is drawn to. That is driven by the
+///       `frameListener` callback that the wayland compositor will trigger when it's ready for
 ///       another image. In present mode FIFO this should correspond to the monitors display rate
 ///       using v-sync.
 ///       However, `input_fps` can be used to limit / reduce the display refresh rate
@@ -84,6 +92,71 @@ const input_fps: u32 = 30;
 //
 //   2. Globals
 //
+
+const asset_path_icon = "assets/icons/";
+
+const IconType = enum {
+    add,
+    arrow_back,
+    check_circle,
+    close,
+    delete,
+    favorite,
+    home,
+    logout,
+    menu,
+    search,
+    settings,
+    star,
+};
+
+const icon_texture_row_count: u32 = 4;
+const icon_texture_column_count: u32 = 3;
+
+const icon_path_list_count: usize = icon_texture_row_count * icon_texture_column_count;
+
+fn icon_path_list(comptime icon_type: IconType) []const u8 {
+    const icon_list = [icon_path_list_count][]const u8{
+        "add.png",
+        "arrow_back.png",
+        "check_circle.png",
+        "close.png",
+        "delete.png",
+        "favorite.png",
+        "home.png",
+        "logout.png",
+        "menu.png",
+        "search.png",
+        "settings.png",
+        "star.png",
+    };
+    return asset_path_icon ++ icon_list[@enumToInt(icon_type)];
+}
+
+/// Returns the normalized coordinates of the icon in the
+/// texture image
+fn iconTextureLookup(icon_type: IconType) geometry.Coordinates2D(f32) {
+    const icon_type_index = @enumToInt(icon_type);
+    const x: u32 = icon_type_index % icon_texture_row_count;
+    const y: u32 = icon_type_index / icon_texture_row_count;
+    const x_pixel = x * icon_dimensions.width;
+    const y_pixel = y * icon_dimensions.height;
+    return .{
+        .x = @intToFloat(f32, x_pixel) / @intToFloat(f32, texture_layer_dimensions.width),
+        .y = @intToFloat(f32, y_pixel) / @intToFloat(f32, texture_layer_dimensions.height),
+    };
+}
+
+/// Icon dimensions in pixels
+const icon_dimensions = geometry.Dimensions2D(u32){
+    .width = 48,
+    .height = 48,
+};
+
+const icon_texture_dimensions = geometry.Dimensions2D(u32){
+    .width = icon_dimensions.width * icon_texture_row_count,
+    .height = icon_dimensions.height * icon_texture_column_count,
+};
 
 // NOTE: The max texture size that is guaranteed is 4096 * 4096
 //       Support for larger textures will need to be queried
@@ -136,7 +209,10 @@ var texture_image: vk.Image = undefined;
 var texture_vertices_buffer: vk.Buffer = undefined;
 var texture_indices_buffer: vk.Buffer = undefined;
 
-var image_memory_map: [*]u8 = undefined;
+var texture_memory_map: [*]graphics.RGBA(f32) = undefined;
+
+var background_color_loop_time_base: i64 = undefined;
+
 // TODO:
 var texture_size_bytes: usize = 0;
 
@@ -195,7 +271,6 @@ const GraphicsContext = struct {
     images_available: []vk.Semaphore,
     renders_finished: []vk.Semaphore,
     inflight_fences: []vk.Fence,
-    
 };
 
 /// Used to allocate QuadFaceWriters that share backing memory
@@ -325,6 +400,29 @@ const graphics = struct {
             },
             else => @compileError("Invalid AnchorPoint"),
         };
+    }
+
+    pub fn generateTexturedQuad(
+        comptime VertexType: type,
+        extent: geometry.Extent2D(TypeOfField(VertexType, "x")),
+        texture_extent: geometry.Extent2D(TypeOfField(VertexType, "tx")),
+        comptime anchor_point: AnchorPoint,
+    ) QuadFace(VertexType) {
+        std.debug.assert(TypeOfField(VertexType, "x") == TypeOfField(VertexType, "y"));
+        std.debug.assert(TypeOfField(VertexType, "tx") == TypeOfField(VertexType, "ty"));
+        var base_quad = generateQuad(VertexType, extent, anchor_point);
+        base_quad[0].tx = texture_extent.x;
+        base_quad[0].ty = texture_extent.y;
+
+        base_quad[1].tx = texture_extent.x + texture_extent.width;
+        base_quad[1].ty = texture_extent.y;
+
+        base_quad[2].tx = texture_extent.x + texture_extent.width;
+        base_quad[2].ty = texture_extent.y + texture_extent.height;
+
+        base_quad[3].tx = texture_extent.x;
+        base_quad[3].ty = texture_extent.y + texture_extent.height;
+        return base_quad;
     }
 
     pub fn generateQuadColored(
@@ -465,6 +563,8 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     std.log.info("Target MS / frame: {d}", .{target_ms_per_frame});
     std.log.info("Target nanoseconds / frame: {d}", .{target_ns_per_frame});
 
+    background_color_loop_time_base = std.time.milliTimestamp();
+
     while (!window_close_requested) {
         frame_count += 1;
 
@@ -539,8 +639,8 @@ fn draw() !void {
     const inner_margin_pixels: u32 = 10;
     
     const dimensions_pixels = geometry.Dimensions2D(u32) {
-        .width = 50,
-        .height = 50,
+        .width = icon_dimensions.width,
+        .height = icon_dimensions.height,
     };
 
     const insufficient_horizontal_space = (screen_dimensions.width < (dimensions_pixels.width + outer_margin_pixels * 2));
@@ -573,9 +673,6 @@ fn draw() !void {
         }
     }
 
-    var face_writer = quad_face_writer_pool.create(0, vertices_range_size / @sizeOf(graphics.GenericVertex));
-    var faces = try face_writer.allocate(horizonal_count * vertical_count);
-
     const x_begin_pixels = outer_margin_pixels + (horizonal_quad_space_pixels / 2);
     const y_begin_pixels = outer_margin_pixels + (vertical_quad_space_pixels / 2);
 
@@ -585,12 +682,8 @@ fn draw() !void {
     const stride_horizonal = @intToFloat(f32, (dimensions_pixels.width + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.width);
     const stride_vertical = @intToFloat(f32, (dimensions_pixels.height + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.height);
 
-    const color = graphics.RGBA(f32) {
-        .r = 1.0,
-        .g = 0.6,
-        .b = 1.0,
-        .a = 1.0,
-    };
+    var face_writer = quad_face_writer_pool.create(0, vertices_range_size / @sizeOf(graphics.GenericVertex));
+    var faces = try face_writer.allocate(horizonal_count * vertical_count);
 
     var horizonal_i: u32 = 0;
     while(horizonal_i < horizonal_count) : (horizonal_i += 1) {
@@ -603,11 +696,17 @@ fn draw() !void {
                 .height = @intToFloat(f32, dimensions_pixels.height) / @intToFloat(f32, screen_dimensions.height) * 2.0,
             };
             const face_index = horizonal_i + (vertical_i * horizonal_count);
-            faces[face_index] = graphics.generateQuadColored(graphics.GenericVertex, extent, color, .top_left);
+            const texture_coordinates = iconTextureLookup(@intToEnum(IconType, face_index % icon_path_list_count));
+            const texture_extent = geometry.Extent2D(f32) {
+                .x = texture_coordinates.x,
+                .y = texture_coordinates.y,
+                .width = @intToFloat(f32, icon_dimensions.width) / @intToFloat(f32, texture_layer_dimensions.width),
+                .height = @intToFloat(f32, icon_dimensions.height) / @intToFloat(f32, texture_layer_dimensions.height),
+            };
+            faces[face_index] = graphics.generateTexturedQuad(graphics.GenericVertex, extent, texture_extent, .top_left);
         }
     }
-
-    vertex_buffer_quad_count = horizonal_count * vertical_count;
+    vertex_buffer_quad_count = (horizonal_count * vertical_count);
 }
 
 fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
@@ -844,9 +943,6 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     std.log.info("Memory type selected: {d}", .{mesh_memory_index});
 
-    var texture_width: u32 = 0;
-    var texture_height: u32 = 0;
-
     {
         const image_create_info = vk.ImageCreateInfo{
             .flags = .{},
@@ -907,7 +1003,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     // Just putting this code here for reference
     // Currently I'm using host visible memory so a staging buffer is not required
 
-    // TODO: Using the staging buffer will cause the image_memory_map map to point to the staging buffer
+    // TODO: Using the staging buffer will cause the texture_memory map to point to the staging buffer
     //       Instead of the uploaded memory
     const is_staging_buffer_required: bool = false;
     if (is_staging_buffer_required) {
@@ -917,7 +1013,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                 .size = texture_size_bytes * 2,
                 .usage = .{ .transfer_src_bit = true },
                 .sharing_mode = .exclusive,
-                .queue_family_index_count = undefined,
+                .queue_family_index_count = 0,
                 .p_queue_family_indices = undefined,
             };
             break :blk try app.device_dispatch.createBuffer(app.logical_device, &create_buffer_info, null);            
@@ -932,17 +1028,20 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         };
 
         try app.device_dispatch.bindBufferMemory(app.logical_device, staging_buffer, staging_memory, 0);
-        image_memory_map = @ptrCast([*]u8, (try app.device_dispatch.mapMemory(app.logical_device, staging_memory, 0, texture_layer_size * 2, .{})).?);
+        {
+            var mapped_memory_ptr = (try app.device_dispatch.mapMemory(app.logical_device, staging_memory, 0, staging_memory, .{})).?;
+            texture_memory_map = @ptrCast([*]graphics.RGBA(f32), @alignCast(4, mapped_memory_ptr));
+        }
 
         // TODO: texture_size_bytes * 2
-        // if (.success != vk.vkMapMemory(app.logical_device, staging_memory, 0, texture_layer_size * 2, 0, @ptrCast(?**anyopaque, &image_memory_map))) {
+        // if (.success != vk.vkMapMemory(app.logical_device, staging_memory, 0, texture_layer_size * 2, 0, @ptrCast(?**anyopaque, &texture_memory_map))) {
         //     return error.MapMemoryFailed;
         // }
 
         // Copy our second image to same memory
         // TODO: Fix data layout access
-        // @memcpy(image_memory_map, @ptrCast([*]u8, glyph_set.image), texture_layer_size);
-        // @memcpy(image_memory_map + texture_layer_size, @ptrCast([*]u8, texture_layer), texture_layer_size);
+        // @memcpy(texture_memory_map, @ptrCast([*]u8, glyph_set.image), texture_layer_size);
+        // @memcpy(texture_memory_map + texture_layer_size, @ptrCast([*]u8, texture_layer), texture_layer_size);
 
         // No need to unmap memory
         // vk.vkUnmapMemory(app.logical_device, staging_memory);
@@ -985,8 +1084,8 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                 }, 
                 .image_offset = .{ .x = 0, .y = 0, .z = 0 }, 
                     .image_extent = .{
-                    .width = texture_width,
-                    .height = texture_height,
+                    .width = texture_layer_dimensions.width,
+                    .height = texture_layer_dimensions.height,
                     .depth = 1,
                 } 
             },
@@ -1002,8 +1101,8 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                 }, 
                 .image_offset = .{ .x = 0, .y = 0, .z = 0 }, 
                 .image_extent = .{
-                    .width = texture_width,
-                    .height = texture_height,
+                    .width = texture_layer_dimensions.width,
+                    .height = texture_layer_dimensions.height,
                     .depth = 1,
                 }
             },
@@ -1012,16 +1111,75 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         _ = app.device_dispatch.cmdCopyBufferToImage(command_buffer, staging_buffer, texture_image, .transfer_dst_optimal, 2, &regions);
     } else {
         std.debug.assert(texture_layer_size <= texture_memory_requirements.size);
-        image_memory_map = @ptrCast([*]u8, (try app.device_dispatch.mapMemory(app.logical_device, image_memory, 0, texture_layer_size, .{})).?);
+        {
+            var mapped_memory_ptr = (try app.device_dispatch.mapMemory(app.logical_device, image_memory, 0, texture_layer_size, .{})).?;
+            texture_memory_map = @ptrCast([*]graphics.RGBA(f32), @alignCast(4, mapped_memory_ptr));
+        }
 
-        // if (.success != vk.vkMapMemory(app.logical_device, image_memory, 0, texture_layer_size * 2, 0, @ptrCast(?**anyopaque, &image_memory_map))) {
-        // return error.MapMemoryFailed;
-        // }
+        // TODO: This could be done on another thread
+        // TODO: This is a rather convaluted way of doing this. Should rework
+        inline for(@typeInfo(IconType).Enum.fields) |icon_type, icon_type_i| {
+            const icon_image = try img.Image.fromFilePath(allocator, icon_path_list(@intToEnum(IconType, icon_type.value))); 
 
-        // Copy our second image to same memory
-        // TODO: Fix data layout access
-        // @memcpy(image_memory_map, @ptrCast([*]u8, glyph_set.image), texture_layer_size);
-        // @memcpy(image_memory_map + texture_layer_size, @ptrCast([*]u8, texture_layer), texture_layer_size);
+            if(icon_image.width != icon_image.width or icon_image.height != icon_image.height) {
+                std.log.err("Icon image for icon '{s}' has unexpected dimensions."
+                         ++ "Icon assets may have gotten corrupted", .{icon_type.name});
+                return error.AssetIconsDimensionsMismatch;
+            }
+
+            const source_pixels = switch(icon_image.pixels.?) {
+                .rgba32 => |pixels| pixels,
+                else => {
+                    std.log.err("Icon images are expected to be in rgba32. Icon '{s}' may have gotten corrupted", .{icon_type.name});
+                    return error.AssetIconsFormatInvalid;
+                },
+            };
+
+            if(source_pixels.len != (icon_image.width * icon_image.height)) {
+                std.log.err("Loaded image for icon '{s}' has an unexpected number of pixels."
+                         ++ "This is a bug in the application", .{icon_type.name});
+                return error.AssetIconsMalformed;
+            }
+
+            std.debug.assert(source_pixels.len == icon_image.width * icon_image.height);
+
+            const x = icon_type_i % icon_texture_row_count;
+            const y = icon_type_i / icon_texture_row_count;
+            const dst_offset_coords = geometry.Coordinates2D(u32) {
+                .x = x * icon_dimensions.width,
+                .y = y * icon_dimensions.height,
+            };
+            var src_y: u32 = 0;
+            while(src_y < icon_dimensions.height) : (src_y += 1) {
+                var src_x: u32 = 0;
+                while(src_x < icon_dimensions.width) : (src_x += 1) {
+                    const src_index = src_x + (src_y * icon_dimensions.width);
+                    const dst_index = (dst_offset_coords.x + src_x) + ((dst_offset_coords.y + src_y) * texture_layer_dimensions.width);
+
+                    texture_memory_map[dst_index].r = @intToFloat(f32, source_pixels[src_index].a) / 255.0;
+                    texture_memory_map[dst_index].g = @intToFloat(f32, source_pixels[src_index].a) / 255.0;
+                    texture_memory_map[dst_index].b = @intToFloat(f32, source_pixels[src_index].a) / 255.0;
+                    texture_memory_map[dst_index].a = @intToFloat(f32, source_pixels[src_index].a) / 255.0;
+
+                    // if(src_x == 0 or src_x == (icon_dimensions.width - 1) or src_y == 0 or src_y == (icon_dimensions.height - 1)) {
+                    //     texture_memory_map[dst_index].r = 1.0;
+                    //     texture_memory_map[dst_index].g = 0.0;
+                    //     texture_memory_map[dst_index].b = 0.0;
+                    //     texture_memory_map[dst_index].a = 1.0;
+                    // }
+                }
+            }
+            defer icon_image.deinit();
+        }
+
+        // Not sure if this is a hack, but because we multiply the texture sample by the 
+        // color in the fragment shader, we need pixel in the texture that we known will return 1.0
+        // Here we're setting the last pixel to 1.0, which corresponds to a texture mapping of 1.0, 1.0
+        const last_index: usize = (@intCast(usize, texture_layer_dimensions.width) * texture_layer_dimensions.height) - 1;
+        texture_memory_map[last_index].r = 1.0;
+        texture_memory_map[last_index].g = 1.0;
+        texture_memory_map[last_index].b = 1.0;
+        texture_memory_map[last_index].a = 1.0;
     }
 
     // Regardless of whether a staging buffer was used, and the type of memory that backs the texture
@@ -1135,7 +1293,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         .image_sharing_mode = .exclusive,
         // NOTE: Only valid when `image_sharing_mode` is CONCURRENT
         // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkSwapchainCreateInfoKHR.html
-        .queue_family_index_count = undefined,
+        .queue_family_index_count = 0,
         .p_queue_family_indices = undefined,
         .pre_transform = .{ .identity_bit_khr = true },
         .composite_alpha = alpha_mode,
@@ -1180,7 +1338,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             .sharing_mode = .exclusive,
             // NOTE: Only valid when `sharing_mode` is CONCURRENT
             // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkBufferCreateInfo.html
-            .queue_family_index_count = undefined,
+            .queue_family_index_count = 0,
             .p_queue_family_indices = undefined,
             .flags = .{},
         };
@@ -1196,7 +1354,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             .sharing_mode = .exclusive,
             // NOTE: Only valid when `sharing_mode` is CONCURRENT
             // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkBufferCreateInfo.html
-            .queue_family_index_count = undefined,
+            .queue_family_index_count = 0,
             .p_queue_family_indices = undefined,
             .flags = .{},
         };
@@ -1417,7 +1575,7 @@ fn recreateSwapchain(allocator: std.mem.Allocator, app: *GraphicsContext) !void 
         .image_array_layers = 1,
         .image_usage = .{ .color_attachment_bit = true },
         .image_sharing_mode = .exclusive,
-        .queue_family_index_count = undefined,
+        .queue_family_index_count = 0,
         .p_queue_family_indices = undefined,
         .pre_transform = .{ .identity_bit_khr = true },
         .composite_alpha = alpha_mode,
@@ -1470,6 +1628,10 @@ fn recreateSwapchain(allocator: std.mem.Allocator, app: *GraphicsContext) !void 
     }
 }
 
+fn lerp(from: f32, to: f32, value: f32) f32 {
+    return from + (value * (to - from));
+}
+
 fn recordRenderPass(
     app: GraphicsContext,
     indices_count: u32,
@@ -1489,12 +1651,25 @@ fn recordRenderPass(
 
     try app.device_dispatch.resetCommandPool(app.logical_device, app.command_pool, .{});
 
+    const current_time = std.time.milliTimestamp();
+    std.debug.assert(current_time >= background_color_loop_time_base);
+
+    const loop_ms = @intToFloat(f64, background_color_loop_ms);
+    var color_transition: f32 = @floatCast(f32, @rem(@intToFloat(f64, current_time - background_color_loop_time_base), loop_ms) / loop_ms);
+    if(color_transition > 0.5) {
+        color_transition = 1.0 - color_transition;
+    }
+
+    std.debug.assert(color_transition >= 0.0);
+    std.debug.assert(color_transition <= 1.0);
+
     const clear_color = graphics.RGBA(f32){ 
-        .r = background_color.r, 
-        .g = background_color.g, 
-        .b = background_color.g, 
+        .r = lerp(background_color.r, background_color_b.r, color_transition),
+        .g = lerp(background_color.g, background_color_b.g, color_transition),
+        .b = lerp(background_color.b, background_color_b.b, color_transition),
         .a = 1.0 - transparancy_level
     };
+
     const clear_colors = [1]vk.ClearValue{
         vk.ClearValue{
             .color = vk.ClearColorValue{
@@ -2027,7 +2202,7 @@ fn createGraphicsPipeline(
 
     const color_blend_attachment = vk.PipelineColorBlendAttachmentState{
         .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
-        .blend_enable = vk.FALSE,
+        .blend_enable = vk.TRUE,
         .alpha_blend_op = .add,
         .color_blend_op = .add,
         .dst_alpha_blend_factor = .one,
