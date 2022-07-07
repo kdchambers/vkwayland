@@ -2,6 +2,8 @@
 
 *A reference application for vulkan and wayland.*
 
+![Screenshot](assets/screenshot.png)
+
 ### Goals
 
 - Easy to read and understand the code, without heavy abstractions
@@ -23,6 +25,7 @@ Furthermore, questions and discussions are in scope for the project. Feel free t
 - Vulkan synchonization that doesn't rely on deviceWaitIdle (Except on shutdown)
 - Dynamic viewport + scissor for more efficient swapchain recreation
 - Image loading and texture sampling
+- Surface transparency
 
 ### Roadmap
 
