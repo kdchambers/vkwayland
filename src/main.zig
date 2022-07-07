@@ -11,12 +11,12 @@ const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
 
 // TODO:
-// - Use arena in setup function
 // - Audit staging_buffer code
-// - Write a generic shader
-// - Implement fixed pixel sized quads
-// - Reuse buffer when loading icon images
-// - Fix icon_path_list
+// - Audit memory allocation overall
+// - Use a separate memory type for texture data
+// - Audit logging
+// - wayland: Set mouse icon
+// - wayland: Input (mouse & keyboard)
 
 // ====== Contents ======
 //
@@ -27,14 +27,13 @@ const xdg = wayland.client.xdg;
 //  5. Vulkan Code
 //  6. Vulkan Util / Wrapper Functions
 //  7. Print Functions
+//  8. Util + Misc
 //
 // ======================
 
 //
 //   1. Options
 //
-
-const log_level: std.log.Level = .info;
 
 /// Initial screen dimensions
 /// Will be updated as Wayland reports the real screen size and
@@ -47,7 +46,7 @@ var screen_dimensions = geometry.Dimensions2D(ScreenPixelBaseType){
 /// Determines the memory allocated for storing mesh data
 /// Represents the number of quads that will be able to be drawn
 /// This can be a colored quad, or a textured quad such as a charactor
-const max_texture_quads_per_render: u32 = 1024 * 2;
+const max_texture_quads_per_render: u32 = 1024;
 
 /// Maximum number of screen framebuffers to use
 /// 2-3 would be recommented to avoid screen tearing
@@ -70,11 +69,11 @@ const transparancy_enabled = true;
 const transparancy_level = 0.0;
 
 /// Background color of application surface before transparency is applied
-var background_color = graphics.RGB(f32).fromInt(28, 97, 56);
-var background_color_b = graphics.RGB(f32).fromInt(94, 0, 42);
+var background_color = graphics.RGB(f32).fromInt(28, 26, 26);
+var background_color_b = graphics.RGB(f32).fromInt(70, 74, 74);
 
 /// The time in milliseconds for the background color to change
-/// from color a to b
+/// from color a to b, then back to a
 const background_color_loop_ms: u32 = 1000 * 10;
 
 /// Version of Vulkan to use
@@ -89,9 +88,28 @@ const vulkan_api_version = vk.API_VERSION_1_3;
 ///       However, `input_fps` can be used to limit / reduce the display refresh rate
 const input_fps: u32 = 30;
 
+/// Options to print various vulkan objects that will be selected at
+/// runtime based on the hardware / system that is available
+const print_vulkan_objects = struct {
+    /// Capabilities of all available memory types
+    const memory_type_all: bool = true;
+    /// Capabilities of the selected surface
+    /// VSync, transparency, etc
+    const surface_abilties: bool = true;
+};
+
+//
+// Bonus: Options you shouldn't change
+//
+
+const enable_blending = true;
+
 //
 //   2. Globals
 //
+
+const fragment_shader_path = "../shaders/generic.frag.spv";
+const vertex_shader_path = "../shaders/generic.vert.spv";
 
 const asset_path_icon = "assets/icons/";
 
@@ -113,28 +131,22 @@ const IconType = enum {
 const icon_texture_row_count: u32 = 4;
 const icon_texture_column_count: u32 = 3;
 
-const icon_path_list_count: usize = icon_texture_row_count * icon_texture_column_count;
+const icon_path_list = [_][]const u8{
+    asset_path_icon ++ "add.png",
+    asset_path_icon ++ "arrow_back.png",
+    asset_path_icon ++ "check_circle.png",
+    asset_path_icon ++ "close.png",
+    asset_path_icon ++ "delete.png",
+    asset_path_icon ++ "favorite.png",
+    asset_path_icon ++ "home.png",
+    asset_path_icon ++ "logout.png",
+    asset_path_icon ++ "menu.png",
+    asset_path_icon ++ "search.png",
+    asset_path_icon ++ "settings.png",
+    asset_path_icon ++ "star.png",
+};
 
-fn icon_path_list(comptime icon_type: IconType) []const u8 {
-    const icon_list = [icon_path_list_count][]const u8{
-        "add.png",
-        "arrow_back.png",
-        "check_circle.png",
-        "close.png",
-        "delete.png",
-        "favorite.png",
-        "home.png",
-        "logout.png",
-        "menu.png",
-        "search.png",
-        "settings.png",
-        "star.png",
-    };
-    return asset_path_icon ++ icon_list[@enumToInt(icon_type)];
-}
-
-/// Returns the normalized coordinates of the icon in the
-/// texture image
+/// Returns the normalized coordinates of the icon in the texture image
 fn iconTextureLookup(icon_type: IconType) geometry.Coordinates2D(f32) {
     const icon_type_index = @enumToInt(icon_type);
     const x: u32 = icon_type_index % icon_texture_row_count;
@@ -202,7 +214,7 @@ var wayland_client: WaylandClient = undefined;
 var alpha_mode: vk.CompositeAlphaFlagsKHR = .{ .opaque_bit_khr = true };
 var window_close_requested: bool = false;
 
-var vertex_buffer_quad_count: u32 = 1;
+var vertex_buffer_quad_count: u32 = 0;
 
 var texture_image_view: vk.ImageView = undefined;
 var texture_image: vk.Image = undefined;
@@ -213,15 +225,13 @@ var texture_memory_map: [*]graphics.RGBA(f32) = undefined;
 
 var background_color_loop_time_base: i64 = undefined;
 
-// TODO:
-var texture_size_bytes: usize = 0;
+const texture_size_bytes = texture_layer_dimensions.width * texture_layer_dimensions.height * @sizeOf(graphics.RGBA(f32));
 
 // Used to collecting some basic performance data
 var frame_count: u64 = 0;
 var slowest_frame_ns: u64 = 0;
 var fastest_frame_ns: u64 = std.math.maxInt(u64);
-var frame_duration_awake_ns: u128 = 0;
-var frame_duration_total_ns: u128 = 0;
+var frame_duration_total_ns: u64 = 0;
 
 //
 //   3. Core Types + Functions
@@ -274,7 +284,7 @@ const GraphicsContext = struct {
 };
 
 /// Used to allocate QuadFaceWriters that share backing memory
-pub fn QuadFaceWriterPool(comptime VertexType: type) type {
+fn QuadFaceWriterPool(comptime VertexType: type) type {
     return struct {
         const QuadFace = graphics.QuadFace;
 
@@ -295,34 +305,22 @@ pub fn QuadFaceWriterPool(comptime VertexType: type) type {
     };
 }
 
-pub fn QuadFaceWriter(comptime VertexType: type) type {
+fn QuadFaceWriter(comptime VertexType: type) type {
     return struct {
         const QuadFace = graphics.QuadFace;
 
         memory_ptr: [*]QuadFace(VertexType),
 
         quad_index: u32,
-        pool_index: u32,
         capacity: u32,
         used: u32 = 0,
 
         pub fn initialize(base: [*]QuadFace(VertexType), quad_index: u32, quad_size: u32) @This() {
             return .{
                 .memory_ptr = @ptrCast([*]QuadFace(VertexType), &base[quad_index]),
-                .pool_index = 0,
                 .quad_index = quad_index,
                 .capacity = quad_size,
                 .used = 0,
-            };
-        }
-
-        pub fn child(self: *@This(), start_index: u16, count: u16) QuadFaceWriter(VertexType) {
-            return .{
-                .memory_ptr = @ptrCast([*]QuadFace(VertexType), self.memory_ptr[start_index]),
-                .used = 0,
-                .capacity = count,
-                .quad_index = 0,
-                .pool_index = 0,
             };
         }
 
@@ -560,8 +558,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     const target_ms_per_frame: u32 = 1000 / input_fps;
     const target_ns_per_frame = target_ms_per_frame * std.time.ns_per_ms;
 
-    std.log.info("Target MS / frame: {d}", .{target_ms_per_frame});
-    std.log.info("Target nanoseconds / frame: {d}", .{target_ns_per_frame});
+    std.log.info("Target milliseconds / frame: {d}", .{target_ms_per_frame});
 
     background_color_loop_time_base = std.time.milliTimestamp();
 
@@ -603,7 +600,6 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         std.debug.assert(frame_end_ns >= frame_start_ns);
 
         const frame_duration_ns = @intCast(u64, frame_end_ns - frame_start_ns);
-        frame_duration_awake_ns += @intCast(u64, frame_duration_ns);
 
         if (frame_duration_ns > slowest_frame_ns) {
             slowest_frame_ns = frame_duration_ns;
@@ -623,11 +619,11 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         frame_duration_total_ns += @intCast(u64, frame_completion_ns - frame_start_ns);
     }
 
-    std.log.info("Run time: {d} seconds", .{frame_duration_total_ns / std.time.ns_per_s});
+    std.log.info("Run time: {d}", .{std.fmt.fmtDuration(frame_duration_total_ns)});
     std.log.info("Frame count: {d}", .{frame_count});
-    std.log.info("Slowest: {d} ns", .{slowest_frame_ns});
-    std.log.info("Fastest: {d} ns", .{fastest_frame_ns});
-    std.log.info("Average: {d} ns", .{(frame_duration_total_ns / frame_count)});
+    std.log.info("Slowest: {}", .{std.fmt.fmtDuration(slowest_frame_ns)});
+    std.log.info("Fastest: {}", .{std.fmt.fmtDuration(fastest_frame_ns)});
+    std.log.info("Average: {}", .{std.fmt.fmtDuration((frame_duration_total_ns / frame_count))});
 
     try app.device_dispatch.deviceWaitIdle(app.logical_device);
 }
@@ -696,7 +692,7 @@ fn draw() !void {
                 .height = @intToFloat(f32, dimensions_pixels.height) / @intToFloat(f32, screen_dimensions.height) * 2.0,
             };
             const face_index = horizonal_i + (vertical_i * horizonal_count);
-            const texture_coordinates = iconTextureLookup(@intToEnum(IconType, face_index % icon_path_list_count));
+            const texture_coordinates = iconTextureLookup(@intToEnum(IconType, face_index % icon_path_list.len));
             const texture_extent = geometry.Extent2D(f32) {
                 .x = texture_coordinates.x,
                 .y = texture_coordinates.y,
@@ -771,6 +767,9 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         defer allocator.free(physical_devices);
 
         for (physical_devices) |physical_device, physical_device_i| {
+
+            std.log.info("Physical vulkan devices found: {d}", .{physical_devices.len});
+
             const device_supports_extensions = blk: {
                 var extension_count: u32 = undefined;
                 if(.success != (try app.instance_dispatch.enumerateDeviceExtensionProperties(physical_device, null, &extension_count, null))) {
@@ -819,7 +818,8 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             var queue_families: [max_family_queues]vk.QueueFamilyProperties = undefined;
             app.instance_dispatch.getPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, &queue_families);
 
-            printQueueFamilyPropertiesList(queue_families[0..queue_family_count]);
+            std.debug.print("** Queue Families found on device **\n\n", .{});
+            printVulkanQueueFamilies(queue_families[0..queue_family_count], 0);
 
             for(queue_families[0..queue_family_count]) |queue_family, queue_family_i| {
                 if (queue_family.queue_count <= 0) {
@@ -842,8 +842,6 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         }
         break :outer null;
     };
-
-    std.log.info("Device selected", .{});
 
     if (best_physical_device) |physical_device| {
         app.physical_device = physical_device;
@@ -899,7 +897,11 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         //  - Device local (Memory on the GPU / APU)
 
         const memory_properties = app.instance_dispatch.getPhysicalDeviceMemoryProperties(app.physical_device);
-        printVulkanDevicePhysicalMemoryProperties(memory_properties);
+        if(print_vulkan_objects.memory_type_all) {
+            std.debug.print("\n** Memory heaps found on system **\n\n", .{});
+            printVulkanMemoryHeaps(memory_properties, 0);
+            std.debug.print("\n", .{});
+        }
 
         const kib: u32 = 1024;
         const mib: u32 = kib * 1024;
@@ -929,6 +931,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             if (memory_flags.host_visible_bit) {
                 suitable_memory_type_index_opt = memory_type_index;
                 if (memory_flags.device_local_bit) {
+                    std.log.info("Selected memory for mesh buffer: Heap index ({d}) Memory index ({d})", .{heap_index, memory_type_index});
                     break :blk memory_type_index;
                 }
             }
@@ -940,8 +943,6 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
         return error.NoValidVulkanMemoryTypes;
     };
-
-    std.log.info("Memory type selected: {d}", .{mesh_memory_index});
 
     {
         const image_create_info = vk.ImageCreateInfo{
@@ -1117,34 +1118,37 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         }
 
         // TODO: This could be done on another thread
-        // TODO: This is a rather convaluted way of doing this. Should rework
-        inline for(@typeInfo(IconType).Enum.fields) |icon_type, icon_type_i| {
-            const icon_image = try img.Image.fromFilePath(allocator, icon_path_list(@intToEnum(IconType, icon_type.value))); 
+        for(icon_path_list) |icon_path, icon_path_i| {
+            // TODO: Create an  arena / allocator of a fixed size that can be reused here.
+            const icon_image = try img.Image.fromFilePath(allocator, icon_path);
+            defer icon_image.deinit();
+
+            const icon_type = @intToEnum(IconType, icon_path_i);
 
             if(icon_image.width != icon_image.width or icon_image.height != icon_image.height) {
                 std.log.err("Icon image for icon '{s}' has unexpected dimensions."
-                         ++ "Icon assets may have gotten corrupted", .{icon_type.name});
+                         ++ "Icon assets may have gotten corrupted", .{icon_type});
                 return error.AssetIconsDimensionsMismatch;
             }
 
             const source_pixels = switch(icon_image.pixels.?) {
                 .rgba32 => |pixels| pixels,
                 else => {
-                    std.log.err("Icon images are expected to be in rgba32. Icon '{s}' may have gotten corrupted", .{icon_type.name});
+                    std.log.err("Icon images are expected to be in rgba32. Icon '{s}' may have gotten corrupted", .{icon_type});
                     return error.AssetIconsFormatInvalid;
                 },
             };
 
             if(source_pixels.len != (icon_image.width * icon_image.height)) {
                 std.log.err("Loaded image for icon '{s}' has an unexpected number of pixels."
-                         ++ "This is a bug in the application", .{icon_type.name});
+                         ++ "This is a bug in the application", .{icon_type});
                 return error.AssetIconsMalformed;
             }
 
             std.debug.assert(source_pixels.len == icon_image.width * icon_image.height);
 
-            const x = icon_type_i % icon_texture_row_count;
-            const y = icon_type_i / icon_texture_row_count;
+            const x = @intCast(u32, icon_path_i) % icon_texture_row_count;
+            const y = @intCast(u32, icon_path_i) / icon_texture_row_count;
             const dst_offset_coords = geometry.Coordinates2D(u32) {
                 .x = x * icon_dimensions.width,
                 .y = y * icon_dimensions.height,
@@ -1160,16 +1164,8 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                     texture_memory_map[dst_index].g = @intToFloat(f32, source_pixels[src_index].a) / 255.0;
                     texture_memory_map[dst_index].b = @intToFloat(f32, source_pixels[src_index].a) / 255.0;
                     texture_memory_map[dst_index].a = @intToFloat(f32, source_pixels[src_index].a) / 255.0;
-
-                    // if(src_x == 0 or src_x == (icon_dimensions.width - 1) or src_y == 0 or src_y == (icon_dimensions.height - 1)) {
-                    //     texture_memory_map[dst_index].r = 1.0;
-                    //     texture_memory_map[dst_index].g = 0.0;
-                    //     texture_memory_map[dst_index].b = 0.0;
-                    //     texture_memory_map[dst_index].a = 1.0;
-                    // }
                 }
             }
-            defer icon_image.deinit();
         }
 
         // Not sure if this is a hack, but because we multiply the texture sample by the 
@@ -1241,7 +1237,12 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     }, null);
 
     const surface_capabilities = try app.instance_dispatch.getPhysicalDeviceSurfaceCapabilitiesKHR(app.physical_device, app.surface);
-    printSurfaceCapabilities(surface_capabilities);
+
+    if(print_vulkan_objects.surface_abilties) {
+        std.debug.print("** Selected surface capabilites **\n\n", .{});
+        printSurfaceCapabilities(surface_capabilities, 1);
+        std.debug.print("\n", .{});
+    }
 
     if(transparancy_enabled) {
         // Check to see if the compositor supports transparent windows and what
@@ -1261,8 +1262,6 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     if (surface_capabilities.current_extent.width == 0xFFFFFFFF or surface_capabilities.current_extent.height == 0xFFFFFFFF) {
         app.swapchain_extent.width = screen_dimensions.width;
         app.swapchain_extent.height = screen_dimensions.height;
-
-        std.log.info("Extent for swapchain: {d},{d}", .{ app.swapchain_extent.width, app.swapchain_extent.height });
     }
 
     std.debug.assert(app.swapchain_extent.width >= surface_capabilities.min_image_extent.width);
@@ -1305,7 +1304,6 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         .flags = .{},
         .old_swapchain = .null_handle,
     }, null);
-    std.log.info("Swapchain created", .{});
 
     app.swapchain_images = blk: {
         var image_count: u32 = undefined;
@@ -1415,8 +1413,8 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         i += 1;
     }
 
-    app.vertex_shader_module = try createVertexShaderModule(app.*);
-    app.fragment_shader_module = try createFragmentShaderModule(app.*);
+    app.vertex_shader_module = try createVertexShaderModule(app.*, vertex_shader_path);
+    app.fragment_shader_module = try createFragmentShaderModule(app.*, fragment_shader_path);
 
     std.debug.assert(app.swapchain_images.len > 0);
 
@@ -1548,7 +1546,7 @@ fn waylandSetup() !void {
 
 fn recreateSwapchain(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
-    std.log.info("Recreating swapchain", .{});
+    const recreate_swapchain_start = std.time.nanoTimestamp();
 
     _ = try app.device_dispatch.waitForFences(
         app.logical_device,
@@ -1626,10 +1624,12 @@ fn recreateSwapchain(allocator: std.mem.Allocator, app: *GraphicsContext) !void 
             app.framebuffers[i] = try app.device_dispatch.createFramebuffer(app.logical_device, &framebuffer_create_info, null);
         }
     }
-}
 
-fn lerp(from: f32, to: f32, value: f32) f32 {
-    return from + (value * (to - from));
+    const recreate_swapchain_end = std.time.nanoTimestamp();
+    std.debug.assert(recreate_swapchain_end >= recreate_swapchain_start);
+    const recreate_swapchain_duration = @intCast(u64, recreate_swapchain_end - recreate_swapchain_start);
+
+    std.log.info("Swapchain recreated in {}", .{std.fmt.fmtDuration(recreate_swapchain_duration)});
 }
 
 fn recordRenderPass(
@@ -2202,7 +2202,7 @@ fn createGraphicsPipeline(
 
     const color_blend_attachment = vk.PipelineColorBlendAttachmentState{
         .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
-        .blend_enable = vk.TRUE,
+        .blend_enable = if(enable_blending) vk.TRUE else vk.FALSE,
         .alpha_blend_op = .add,
         .color_blend_op = .add,
         .dst_alpha_blend_factor = .one,
@@ -2306,9 +2306,8 @@ fn createFramebuffers(allocator: std.mem.Allocator, app: GraphicsContext) ![]vk.
 //
 
 // TODO: Extract path + data
-fn createFragmentShaderModule(app: GraphicsContext) !vk.ShaderModule {
-    const fragment_shader_path = "../shaders/generic.frag.spv";
-    const shader_fragment_spv align(4) = @embedFile(fragment_shader_path);
+fn createFragmentShaderModule(app: GraphicsContext, comptime shader_path: []const u8) !vk.ShaderModule {
+    const shader_fragment_spv align(4) = @embedFile(shader_path);
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shader_fragment_spv.len,
         .p_code = @ptrCast([*]const u32, shader_fragment_spv),
@@ -2317,9 +2316,8 @@ fn createFragmentShaderModule(app: GraphicsContext) !vk.ShaderModule {
     return try app.device_dispatch.createShaderModule(app.logical_device, &create_info, null);
 }
 
-fn createVertexShaderModule(app: GraphicsContext) !vk.ShaderModule {
-    const vertex_shader_path = "../shaders/generic.vert.spv";
-    const shader_vertex_spv align(4) = @embedFile(vertex_shader_path);
+fn createVertexShaderModule(app: GraphicsContext, comptime shader_path: []const u8) !vk.ShaderModule {
+    const shader_vertex_spv align(4) = @embedFile(shader_path);
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shader_vertex_spv.len,
         .p_code = @ptrCast([*]const u32, shader_vertex_spv),
@@ -2366,95 +2364,110 @@ fn selectSurfaceFormat(
 //   7. Print Functions
 //
 
-pub fn printVulkanDevicePhysicalMemoryProperties(memory_properties: vk.PhysicalDeviceMemoryProperties) void {
-    const log = std.log;
+fn printVulkanMemoryHeap(memory_properties: vk.PhysicalDeviceMemoryProperties, heap_index: u32, comptime indent_level: u32) void {
 
+    const heap_count: u32 = memory_properties.memory_heap_count;
+    std.debug.assert(heap_index <= heap_count);
+    const base_indent = "  " ** indent_level;
+
+    const heap_properties = memory_properties.memory_heaps[heap_index];
+
+    const print = std.debug.print;
+    print(base_indent ++ "Heap Index #{d}\n", .{heap_index});
+    print(base_indent ++ "  Capacity:       {}\n", .{std.fmt.fmtIntSizeDec(heap_properties.size)});
+    print(base_indent ++ "  Device Local:   {}\n", .{heap_properties.flags.device_local_bit});
+    print(base_indent ++ "  Multi Instance: {}\n", .{heap_properties.flags.multi_instance_bit});
+    print(base_indent ++ "  Memory Types:\n", .{});
+
+    const memory_type_count = memory_properties.memory_type_count;
+
+    var memory_type_i: u32 = 0;
+    while (memory_type_i < memory_type_count) : (memory_type_i += 1) {
+        if(memory_properties.memory_types[memory_type_i].heap_index == heap_index) {
+            print(base_indent ++ "    Memory Index #{}\n", .{memory_type_i});
+            const memory_flags = memory_properties.memory_types[memory_type_i].property_flags;
+            print(base_indent ++ "      Device Local:     {}\n", .{memory_flags.device_local_bit});
+            print(base_indent ++ "      Host Visible:     {}\n", .{memory_flags.host_visible_bit});
+            print(base_indent ++ "      Host Coherent:    {}\n", .{memory_flags.host_coherent_bit});
+            print(base_indent ++ "      Host Cached:      {}\n", .{memory_flags.host_cached_bit});
+            print(base_indent ++ "      Lazily Allocated: {}\n", .{memory_flags.lazily_allocated_bit});
+            print(base_indent ++ "      Protected:        {}\n", .{memory_flags.protected_bit});
+        }
+    }
+}
+
+fn printVulkanMemoryHeaps(memory_properties: vk.PhysicalDeviceMemoryProperties, comptime indent_level: u32) void {
     var heap_count: u32 = memory_properties.memory_heap_count;
-
-    var i: u32 = 0;
-    while (i < heap_count) {
-        log.info("Heap #{}", .{i});
-        log.info("  Capacity: {} bytes", .{memory_properties.memory_heaps[i].size});
-        log.info("  Device Local:   {}", .{memory_properties.memory_heaps[i].flags.device_local_bit});
-        log.info("  Multi Instance: {}", .{memory_properties.memory_heaps[i].flags.multi_instance_bit});
-
-        i += 1;
-    }
-
-    var memory_type_counter: u32 = 0;
-    var memory_type_count = memory_properties.memory_type_count;
-
-    while (memory_type_counter < memory_type_count) : (memory_type_counter += 1) {
-        log.info("Memory Type #{}", .{memory_type_counter});
-        log.info("  Memory Heap Index: {}", .{memory_properties.memory_types[memory_type_counter].heap_index});
-
-        const memory_flags = memory_properties.memory_types[memory_type_counter].property_flags;
-        log.info("  Device Local:     {}", .{memory_flags.device_local_bit});
-        log.info("  Host Visible:     {}", .{memory_flags.host_visible_bit});
-        log.info("  Host Coherent:    {}", .{memory_flags.host_coherent_bit});
-        log.info("  Host Cached:      {}", .{memory_flags.host_cached_bit});
-        log.info("  Lazily Allocated: {}", .{memory_flags.lazily_allocated_bit});
-        log.info("  Protected:        {}", .{memory_flags.protected_bit});
+    var heap_i: u32 = 0;
+    while (heap_i < heap_count) : (heap_i += 1) {
+        printVulkanMemoryHeap(memory_properties, heap_i, indent_level);
     }
 }
 
-fn printQueueFamilyPropertiesList(queue_families: []vk.QueueFamilyProperties) void {
+fn printVulkanQueueFamilies(queue_families: []vk.QueueFamilyProperties, comptime indent_level: u32) void {
     const print = std.debug.print;
-    print("Queue Family Property List\n", .{});
+    const base_indent = "  " ** indent_level;
     for(queue_families) |queue_family, queue_family_i| {
-        print("  Queue #{d}\n", .{queue_family_i});
-        printQueueFamilyProperties(queue_family);
+        print(base_indent ++ "Queue family index #{d}\n", .{queue_family_i});
+        printVulkanQueueFamily(queue_family, indent_level + 1);
     }
 }
 
-fn printQueueFamilyProperties(queue_family: vk.QueueFamilyProperties) void {
+fn printVulkanQueueFamily(queue_family: vk.QueueFamilyProperties, comptime indent_level: u32) void {
     const print = std.debug.print;
-    print("  queue count: {d}\n", .{queue_family.queue_count});
-    print("  queue support\n", .{});
-    print("    graphics: {s}\n", .{queue_family.queue_flags.graphics_bit});
-    print("    transfer: {s}\n", .{queue_family.queue_flags.transfer_bit});
-    print("    compute: {s}\n", .{queue_family.queue_flags.compute_bit});
+    const base_indent = "  " ** indent_level;
+    print(base_indent ++ "Queue count: {d}\n", .{queue_family.queue_count});
+    print(base_indent ++ "Support\n", .{});
+    print(base_indent ++ "  Graphics: {s}\n", .{queue_family.queue_flags.graphics_bit});
+    print(base_indent ++ "  Transfer: {s}\n", .{queue_family.queue_flags.transfer_bit});
+    print(base_indent ++ "  Compute:  {s}\n", .{queue_family.queue_flags.compute_bit});
 }
 
-fn printSurfaceCapabilities(surface_capabilities: vk.SurfaceCapabilitiesKHR) void {
+fn printSurfaceCapabilities(surface_capabilities: vk.SurfaceCapabilitiesKHR, comptime indent_level: u32) void {
     const print = std.debug.print;
-    print("*** Surface ***\n", .{});
-    print("  min_image_count: {d}\n", .{surface_capabilities.min_image_count});
-    print("  max_image_count: {d}\n", .{surface_capabilities.max_image_count});
+    const base_indent = "  " ** indent_level;
+    print(base_indent ++ "min_image_count: {d}\n", .{surface_capabilities.min_image_count});
+    print(base_indent ++ "max_image_count: {d}\n", .{surface_capabilities.max_image_count});
 
-    print("  current_extent\n", .{});
-    print("    width:    {d}\n", .{surface_capabilities.current_extent.width});
-    print("    height:   {d}\n", .{surface_capabilities.current_extent.height});
+    print(base_indent ++ "current_extent\n", .{});
+    print(base_indent ++ "  width:    {d}\n", .{surface_capabilities.current_extent.width});
+    print(base_indent ++ "  height:   {d}\n", .{surface_capabilities.current_extent.height});
 
-    print("  min_image_extent\n", .{});
-    print("    width:    {d}\n", .{surface_capabilities.min_image_extent.width});
-    print("    height:   {d}\n", .{surface_capabilities.min_image_extent.height});
+    print(base_indent ++ "min_image_extent\n", .{});
+    print(base_indent ++ "  width:    {d}\n", .{surface_capabilities.min_image_extent.width});
+    print(base_indent ++ "  height:   {d}\n", .{surface_capabilities.min_image_extent.height});
 
-    print("  max_image_extent\n", .{});
-    print("    width:    {d}\n", .{surface_capabilities.max_image_extent.width});
-    print("    height:   {d}\n", .{surface_capabilities.max_image_extent.height});
-    print("  max_image_array_layers: {d}\n", .{surface_capabilities.max_image_array_layers});
+    print(base_indent ++ "max_image_extent\n", .{});
+    print(base_indent ++ "  width:    {d}\n", .{surface_capabilities.max_image_extent.width});
+    print(base_indent ++ "  height:   {d}\n", .{surface_capabilities.max_image_extent.height});
+    print(base_indent ++ "max_image_array_layers: {d}\n", .{surface_capabilities.max_image_array_layers});
 
-    print("  supported_usages\n", .{});
+    print(base_indent ++ "supported_usages\n", .{});
     const supported_usage_flags = surface_capabilities.supported_usage_flags;
-    print("    sampled:                          {s}\n", .{supported_usage_flags.sampled_bit});
-    print("    storage:                          {s}\n", .{supported_usage_flags.storage_bit});
-    print("    color_attachment:                 {s}\n", .{supported_usage_flags.color_attachment_bit});
-    print("    depth_stencil:                    {s}\n", .{supported_usage_flags.depth_stencil_attachment_bit});
-    print("    input_attachment:                 {s}\n", .{supported_usage_flags.input_attachment_bit});
-    print("    transient_attachment:             {s}\n", .{supported_usage_flags.transient_attachment_bit});
-    print("    fragment_shading_rate_attachment: {s}\n", .{supported_usage_flags.fragment_shading_rate_attachment_bit_khr});
-    print("    fragment_density_map:             {s}\n", .{supported_usage_flags.fragment_density_map_bit_ext});
-    print("    video_decode_dst:                 {s}\n", .{supported_usage_flags.video_decode_dst_bit_khr});
-    print("    video_decode_dpb:                 {s}\n", .{supported_usage_flags.video_decode_dpb_bit_khr});
-    print("    video_encode_src:                 {s}\n", .{supported_usage_flags.video_encode_src_bit_khr});
-    print("    video_encode_dpb:                 {s}\n", .{supported_usage_flags.video_encode_dpb_bit_khr});
+    print(base_indent ++ "  sampled:                          {s}\n", .{supported_usage_flags.sampled_bit});
+    print(base_indent ++ "  storage:                          {s}\n", .{supported_usage_flags.storage_bit});
+    print(base_indent ++ "  color_attachment:                 {s}\n", .{supported_usage_flags.color_attachment_bit});
+    print(base_indent ++ "  depth_stencil:                    {s}\n", .{supported_usage_flags.depth_stencil_attachment_bit});
+    print(base_indent ++ "  input_attachment:                 {s}\n", .{supported_usage_flags.input_attachment_bit});
+    print(base_indent ++ "  transient_attachment:             {s}\n", .{supported_usage_flags.transient_attachment_bit});
+    print(base_indent ++ "  fragment_shading_rate_attachment: {s}\n", .{supported_usage_flags.fragment_shading_rate_attachment_bit_khr});
+    print(base_indent ++ "  fragment_density_map:             {s}\n", .{supported_usage_flags.fragment_density_map_bit_ext});
+    print(base_indent ++ "  video_decode_dst:                 {s}\n", .{supported_usage_flags.video_decode_dst_bit_khr});
+    print(base_indent ++ "  video_decode_dpb:                 {s}\n", .{supported_usage_flags.video_decode_dpb_bit_khr});
+    print(base_indent ++ "  video_encode_src:                 {s}\n", .{supported_usage_flags.video_encode_src_bit_khr});
+    print(base_indent ++ "  video_encode_dpb:                 {s}\n", .{supported_usage_flags.video_encode_dpb_bit_khr});
 
-    print("  supportedCompositeAlpha:\n", .{});
-    print("    Opaque KHR      {s}\n", .{surface_capabilities.supported_composite_alpha.opaque_bit_khr});
-    print("    Pre Mult KHR    {s}\n", .{surface_capabilities.supported_composite_alpha.pre_multiplied_bit_khr});
-    print("    Post Mult KHR   {s}\n", .{surface_capabilities.supported_composite_alpha.post_multiplied_bit_khr});
-    print("    Inherit KHR     {s}\n", .{surface_capabilities.supported_composite_alpha.inherit_bit_khr});
+    print(base_indent ++ "supportedCompositeAlpha:\n", .{});
+    print(base_indent ++ "  Opaque KHR      {s}\n", .{surface_capabilities.supported_composite_alpha.opaque_bit_khr});
+    print(base_indent ++ "  Pre Mult KHR    {s}\n", .{surface_capabilities.supported_composite_alpha.pre_multiplied_bit_khr});
+    print(base_indent ++ "  Post Mult KHR   {s}\n", .{surface_capabilities.supported_composite_alpha.post_multiplied_bit_khr});
+    print(base_indent ++ "  Inherit KHR     {s}\n", .{surface_capabilities.supported_composite_alpha.inherit_bit_khr});
+}
 
-    print("\n", .{});
+//
+//   8. Util + Misc
+//
+
+fn lerp(from: f32, to: f32, value: f32) f32 {
+    return from + (value * (to - from));
 }
