@@ -11,12 +11,13 @@ const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
 
 // TODO:
-// - Audit staging_buffer code
 // - Audit memory allocation overall
-// - Use a separate memory type for texture data
 // - Audit logging
 // - wayland: Set mouse icon
 // - wayland: Input (mouse & keyboard)
+// - vulkan: Destroy all vulkan objects
+// - vulkan: Audit staging_buffer code
+// - vulkan: Use a separate memory type for texture data
 
 // ====== Contents ======
 //
@@ -34,6 +35,9 @@ const xdg = wayland.client.xdg;
 //
 //   1. Options
 //
+
+/// Change this to force the log level. Otherwise it is determined by release mode
+pub const log_level: std.log.Level = .info;
 
 /// Screen dimensions of the application, as reported by wayland
 /// Initial values are arbirary and will be updated once the wayland
@@ -68,9 +72,22 @@ const transparancy_enabled = true;
 /// Ignored if `transparancy_enabled` is false
 const transparancy_level = 0.0;
 
-/// Background color of application surface before transparency is applied
-var background_color = graphics.RGB(f32).fromInt(28, 26, 26);
-var background_color_b = graphics.RGB(f32).fromInt(70, 74, 74);
+/// Initial background color of application surface before transparency is applied
+/// Each color refers to a corner of the quad.
+var background_color_a = [4]graphics.RGB(f32) {
+    graphics.RGB(f32).fromInt(66, 77, 26),   // Top Left
+    graphics.RGB(f32).fromInt(65, 88, 200),  // Top Right
+    graphics.RGB(f32).fromInt(111, 89, 156), // Bottom Right
+    graphics.RGB(f32).fromInt(28, 52, 55),   // Bottom Left
+};
+
+/// Background color to transition to
+var background_color_b = [4]graphics.RGB(f32) {
+    graphics.RGB(f32).fromInt(255, 74, 255),
+    graphics.RGB(f32).fromInt(65, 74, 255),
+    graphics.RGB(f32).fromInt(73, 74, 111),
+    graphics.RGB(f32).fromInt(133, 74, 255),
+};
 
 /// The time in milliseconds for the background color to change
 /// from color a to b, then back to a
@@ -110,6 +127,31 @@ const enable_blending = true;
 
 const fragment_shader_path = "../shaders/generic.frag.spv";
 const vertex_shader_path = "../shaders/generic.vert.spv";
+
+// NOTE: The following points aren't used in the code, but are useful to know
+// http://anki3d.org/vulkan-coordinate-system/
+const ScreenPoint = geometry.Coordinates2D(ScreenNormalizedBaseType);
+const point_top_left = ScreenPoint{ .x = -1.0, .y = -1.0};
+const point_top_right = ScreenPoint{ .x = 1.0, .y = -1.0};
+const point_bottom_left = ScreenPoint{ .x = -1.0, .y = 1.0};
+const point_bottom_right = ScreenPoint{ .x = 1.0, .y = 1.0};
+
+/// Defines the entire surface area of a screen in vulkans coordinate system
+/// I.e normalized device coordinates right (ndc right)
+const full_screen_extent = geometry.Extent2D(ScreenNormalizedBaseType) {
+    .x = -1.0,
+    .y = -1.0,
+    .width = 2.0,
+    .height = 2.0,
+};
+
+/// Defines the entire surface area of a texture
+const full_texture_extent = geometry.Extent2D(TextureNormalizedBaseType) {
+    .x = 0.0,
+    .y = 0.0,
+    .width = 1.0,
+    .height = 1.0,
+};
 
 const asset_path_icon = "assets/icons/";
 
@@ -189,6 +231,11 @@ const vertices_range_size = max_texture_quads_per_render * @sizeOf(graphics.Gene
 const vertices_range_count = vertices_range_size / @sizeOf(graphics.GenericVertex);
 const memory_size = indices_range_size + vertices_range_size;
 
+/// Vertices to be reserved at the beginning of our buffer and
+/// not overriden in our draw function
+/// Here we're just reserving the background quad
+const vertices_reserved_range_count = 1;
+
 var quad_face_writer_pool: QuadFaceWriterPool(graphics.GenericVertex) = undefined;
 
 const validation_layers = if (enable_validation_layers)
@@ -201,6 +248,13 @@ const surface_extensions = [_][*:0]const u8{ "VK_KHR_surface", "VK_KHR_wayland_s
 
 var is_draw_required: bool = true;
 var is_render_requested: bool = true;
+
+/// Set when command buffers need to be (re)recorded. The following will cause that to happen
+///   1. First command buffer recording
+///   2. Screen resized
+///   3. Push constants need to be updated
+///   4. Number of vertices to be drawn has changed
+var is_record_requested: bool = true;
 
 var vertex_buffer: []graphics.QuadFace(graphics.GenericVertex) = undefined;
 
@@ -225,6 +279,11 @@ var texture_memory_map: [*]graphics.RGBA(f32) = undefined;
 
 var background_color_loop_time_base: i64 = undefined;
 
+/// Pointer to quad that will be reused to control the background color of the application
+/// An alternative method, would be to use the clear_colors parameter when recording a render pass
+/// However, this allows us to avoid re-recording commands buffers, etc
+var background_quad: *graphics.QuadFace(graphics.GenericVertex) = undefined;
+
 const texture_size_bytes = texture_layer_dimensions.width * texture_layer_dimensions.height * @sizeOf(graphics.RGBA(f32));
 
 // Used to collecting some basic performance data
@@ -232,6 +291,7 @@ var frame_count: u64 = 0;
 var slowest_frame_ns: u64 = 0;
 var fastest_frame_ns: u64 = std.math.maxInt(u64);
 var frame_duration_total_ns: u64 = 0;
+var frame_duration_awake_ns: u64 = 0;
 
 //
 //   3. Core Types + Functions
@@ -411,13 +471,10 @@ const graphics = struct {
         var base_quad = generateQuad(VertexType, extent, anchor_point);
         base_quad[0].tx = texture_extent.x;
         base_quad[0].ty = texture_extent.y;
-
         base_quad[1].tx = texture_extent.x + texture_extent.width;
         base_quad[1].ty = texture_extent.y;
-
         base_quad[2].tx = texture_extent.x + texture_extent.width;
         base_quad[2].ty = texture_extent.y + texture_extent.height;
-
         base_quad[3].tx = texture_extent.x;
         base_quad[3].ty = texture_extent.y + texture_extent.height;
         return base_quad;
@@ -439,8 +496,11 @@ const graphics = struct {
     }
 
     pub const GenericVertex = packed struct {
-        x: f32 = 0.0,
-        y: f32 = 0.0,
+        x: f32 = 1.0,
+        y: f32 = 1.0,
+        // This default value references the last pixel in our texture which
+        // we set all values to 1.0 so that we can use it to multiply a color
+        // without changing it. See fragment shader
         tx: f32 = 1.0,
         ty: f32 = 1.0,
         color: RGBA(f32) = .{
@@ -468,6 +528,16 @@ const graphics = struct {
                     .b = @intToFloat(BaseType, b) / 255.0,
                 };
             }
+
+            pub inline fn toRGBA(self: @This()) RGBA(BaseType) {
+                return .{
+                    .r = self.r,
+                    .g = self.g,
+                    .b = self.b,
+                    .a = 1.0,
+                };
+            }
+
             r: BaseType,
             g: BaseType,
             b: BaseType,
@@ -522,6 +592,13 @@ const geometry = struct {
     }
 };
 
+/// Push constant structure that is used in our fragment shader
+const PushConstant = packed struct {
+    width: f32,
+    height: f32,
+    frame: f32,
+};
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -551,6 +628,8 @@ fn cleanup(allocator: std.mem.Allocator, app: *GraphicsContext) void {
     allocator.free(app.descriptor_set_layouts);
     allocator.free(app.descriptor_sets);
     allocator.free(app.framebuffers);
+
+    app.instance_dispatch.destroySurfaceKHR(app.instance, app.surface, null);
 }
 
 fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
@@ -588,11 +667,59 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             is_draw_required = false;
             try draw();
             is_render_requested = true;
+            is_record_requested = true;
         }
 
         if(is_render_requested) {
             is_render_requested = false;
-            try recordRenderPass(app.*, vertex_buffer_quad_count * 6);
+
+            //
+            // Update our background
+            //
+
+            const current_time = std.time.milliTimestamp();
+            std.debug.assert(current_time >= background_color_loop_time_base);
+
+            const loop_ms = @intToFloat(f64, background_color_loop_ms);
+            var color_transition: f32 = @floatCast(f32, @rem(@intToFloat(f64, current_time - background_color_loop_time_base), loop_ms) / loop_ms);
+            if(color_transition > 0.5) {
+                color_transition = 1.0 - color_transition;
+            }
+
+            std.debug.assert(color_transition >= 0.0);
+            std.debug.assert(color_transition <= 1.0);
+
+            background_quad[0].color = graphics.RGBA(f32){
+                .r = lerp(background_color_a[0].r, background_color_b[0].r, color_transition),
+                .g = lerp(background_color_a[0].g, background_color_b[0].g, color_transition),
+                .b = lerp(background_color_a[0].b, background_color_b[0].b, color_transition),
+                .a = 1.0
+            };
+            background_quad[1].color = graphics.RGBA(f32){
+                .r = lerp(background_color_a[1].r, background_color_b[1].r, color_transition),
+                .g = lerp(background_color_a[1].g, background_color_b[1].g, color_transition),
+                .b = lerp(background_color_a[1].b, background_color_b[1].b, color_transition),
+                .a = 1.0
+            };
+            background_quad[2].color = graphics.RGBA(f32){
+                .r = lerp(background_color_a[2].r, background_color_b[2].r, color_transition),
+                .g = lerp(background_color_a[2].g, background_color_b[2].g, color_transition),
+                .b = lerp(background_color_a[2].b, background_color_b[2].b, color_transition),
+                .a = 1.0
+            };
+            background_quad[3].color = graphics.RGBA(f32){
+                .r = lerp(background_color_a[3].r, background_color_b[3].r, color_transition),
+                .g = lerp(background_color_a[3].g, background_color_b[3].g, color_transition),
+                .b = lerp(background_color_a[3].b, background_color_b[3].b, color_transition),
+                .a = 1.0
+            };
+
+            // Even though we're running at a constant loop, we don't always need to re-record command buffers
+            if(is_record_requested) {
+                is_record_requested = false;
+                try recordRenderPass(app.*, vertex_buffer_quad_count * 6);
+            }
+
             try renderFrame(allocator, app);
         }
 
@@ -613,6 +740,9 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         const remaining_ns: u64 = target_ns_per_frame - @intCast(u64, frame_duration_ns);
         std.debug.assert(remaining_ns <= target_ns_per_frame);
 
+        const frame_work_completed_ns = std.time.nanoTimestamp();
+        frame_duration_awake_ns += @intCast(u64, frame_work_completed_ns - frame_start_ns);
+
         std.time.sleep(remaining_ns);
 
         const frame_completion_ns = std.time.nanoTimestamp();
@@ -623,7 +753,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     std.log.info("Frame count: {d}", .{frame_count});
     std.log.info("Slowest: {}", .{std.fmt.fmtDuration(slowest_frame_ns)});
     std.log.info("Fastest: {}", .{std.fmt.fmtDuration(fastest_frame_ns)});
-    std.log.info("Average: {}", .{std.fmt.fmtDuration((frame_duration_total_ns / frame_count))});
+    std.log.info("Average: {}", .{std.fmt.fmtDuration((frame_duration_awake_ns / frame_count))});
 
     try app.device_dispatch.deviceWaitIdle(app.logical_device);
 }
@@ -678,7 +808,7 @@ fn draw() !void {
     const stride_horizonal = @intToFloat(f32, (dimensions_pixels.width + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.width);
     const stride_vertical = @intToFloat(f32, (dimensions_pixels.height + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.height);
 
-    var face_writer = quad_face_writer_pool.create(0, vertices_range_size / @sizeOf(graphics.GenericVertex));
+    var face_writer = quad_face_writer_pool.create(1, (vertices_range_size - 1) / @sizeOf(graphics.GenericVertex));
     var faces = try face_writer.allocate(horizonal_count * vertical_count);
 
     var horizonal_i: u32 = 0;
@@ -688,8 +818,8 @@ fn draw() !void {
             const extent = geometry.Extent2D(f32) {
                 .x = x_begin + (stride_horizonal * @intToFloat(f32, horizonal_i)),
                 .y = y_begin + (stride_vertical * @intToFloat(f32, vertical_i)),
-                .width = @intToFloat(f32, dimensions_pixels.width) / @intToFloat(f32, screen_dimensions.width) * 2.0,
-                .height = @intToFloat(f32, dimensions_pixels.height) / @intToFloat(f32, screen_dimensions.height) * 2.0,
+                .width = (@intToFloat(f32, dimensions_pixels.width) / @intToFloat(f32, screen_dimensions.width)) * 2.0,
+                .height = (@intToFloat(f32, dimensions_pixels.height) / @intToFloat(f32, screen_dimensions.height)) * 2.0,
             };
             const face_index = horizonal_i + (vertical_i * horizonal_count);
             const texture_coordinates = iconTextureLookup(@intToEnum(IconType, face_index % icon_path_list.len));
@@ -702,7 +832,7 @@ fn draw() !void {
             faces[face_index] = graphics.generateTexturedQuad(graphics.GenericVertex, extent, texture_extent, .top_left);
         }
     }
-    vertex_buffer_quad_count = (horizonal_count * vertical_count);
+    vertex_buffer_quad_count = 1 + (horizonal_count * vertical_count);
 }
 
 fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
@@ -741,6 +871,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             null,
         );
     }
+    errdefer app.instance_dispatch.destroySurfaceKHR(app.instance, app.surface, null);
 
     // Find a suitable physical device (GPU/APU) to use
     // Criteria: 
@@ -978,8 +1109,8 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     try app.device_dispatch.bindImageMemory(app.logical_device, texture_image, image_memory, 0);
 
     const command_pool = try app.device_dispatch.createCommandPool(app.logical_device, &vk.CommandPoolCreateInfo{
-        .flags = .{ .reset_command_buffer_bit = true },
         .queue_family_index = app.graphics_present_queue_index,
+        .flags = .{},
     }, null);
 
     var command_buffer: vk.CommandBuffer = undefined;
@@ -1180,7 +1311,6 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     // Regardless of whether a staging buffer was used, and the type of memory that backs the texture
     // It is neccessary to transition to image layout to SHADER_OPTIMAL
-
     const barrier = [_]vk.ImageMemoryBarrier{
         .{
             .src_access_mask = .{},
@@ -1365,6 +1495,8 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     {
         const vertices_addr = @ptrCast([*]align(@alignOf(graphics.GenericVertex)) u8, &mapped_device_memory[vertices_range_index_begin]);
+        background_quad = @ptrCast(*graphics.QuadFace(graphics.GenericVertex), &vertices_addr[0]);
+        background_quad.* = graphics.generateQuadColored(graphics.GenericVertex, full_screen_extent, background_color_b[0].toRGBA(), .top_left);
         const vertices_quad_size: u32 = vertices_range_size / @sizeOf(graphics.GenericVertex);
         quad_face_writer_pool = QuadFaceWriterPool(graphics.GenericVertex).initialize(vertices_addr, vertices_quad_size);
     }
@@ -1654,22 +1786,13 @@ fn recordRenderPass(
     const current_time = std.time.milliTimestamp();
     std.debug.assert(current_time >= background_color_loop_time_base);
 
-    const loop_ms = @intToFloat(f64, background_color_loop_ms);
-    var color_transition: f32 = @floatCast(f32, @rem(@intToFloat(f64, current_time - background_color_loop_time_base), loop_ms) / loop_ms);
-    if(color_transition > 0.5) {
-        color_transition = 1.0 - color_transition;
-    }
-
-    std.debug.assert(color_transition >= 0.0);
-    std.debug.assert(color_transition <= 1.0);
-
+    // This value should never been seen, as we draw a background quad over it
     const clear_color = graphics.RGBA(f32){ 
-        .r = lerp(background_color.r, background_color_b.r, color_transition),
-        .g = lerp(background_color.g, background_color_b.g, color_transition),
-        .b = lerp(background_color.b, background_color_b.b, color_transition),
+        .r = 0.0,
+        .g = 0.0,
+        .b = 0.0,
         .a = 1.0 - transparancy_level
     };
-
     const clear_colors = [1]vk.ClearValue{
         vk.ClearValue{
             .color = vk.ClearColorValue{
@@ -1741,12 +1864,6 @@ fn recordRenderPass(
             0, 
             undefined,
         );
-        
-        const PushConstant = packed struct {
-            width: f32,
-            height: f32,
-            frame: f32,    
-        };
         
         const push_constant = PushConstant {
             .width = @intToFloat(f32, screen_dimensions.width),       
@@ -2020,9 +2137,9 @@ fn createDescriptorSets(
         .flags = .{},
         .mag_filter = .nearest,
         .min_filter = .nearest,
-        .address_mode_u = .repeat,
-        .address_mode_v = .repeat,
-        .address_mode_w = .repeat,
+        .address_mode_u = .clamp_to_edge,
+        .address_mode_v = .clamp_to_edge,
+        .address_mode_w = .clamp_to_edge,
         .mip_lod_bias = 0.0,
         .anisotropy_enable = vk.FALSE,
         .max_anisotropy = 16.0,
@@ -2065,7 +2182,7 @@ fn createPipelineLayout(app: GraphicsContext, descriptor_set_layouts: []vk.Descr
     const push_constant = vk.PushConstantRange {
         .stage_flags = .{ .fragment_bit = true },
         .offset = 0,
-        .size = 12,
+        .size = @sizeOf(PushConstant),
     };
     const pipeline_layout_create_info = vk.PipelineLayoutCreateInfo{
         .set_layout_count = 1,
