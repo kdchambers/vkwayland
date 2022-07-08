@@ -67,6 +67,9 @@ const application_name = "vkwayland";
 /// Enables transparency on the selected surface
 const transparancy_enabled = true;
 
+/// Color to use for icon images
+const icon_color = graphics.RGB(f32).fromInt(11, 11, 11);
+
 /// The transparency of the selected surface
 /// Valid values between 0.0 (no transparency) and 1.0 (full)
 /// Ignored if `transparancy_enabled` is false
@@ -1291,9 +1294,9 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                     const src_index = src_x + (src_y * icon_dimensions.width);
                     const dst_index = (dst_offset_coords.x + src_x) + ((dst_offset_coords.y + src_y) * texture_layer_dimensions.width);
 
-                    texture_memory_map[dst_index].r = @intToFloat(f32, source_pixels[src_index].a) / 255.0;
-                    texture_memory_map[dst_index].g = @intToFloat(f32, source_pixels[src_index].a) / 255.0;
-                    texture_memory_map[dst_index].b = @intToFloat(f32, source_pixels[src_index].a) / 255.0;
+                    texture_memory_map[dst_index].r = icon_color.r;
+                    texture_memory_map[dst_index].g = icon_color.g;
+                    texture_memory_map[dst_index].b = icon_color.b;
                     texture_memory_map[dst_index].a = @intToFloat(f32, source_pixels[src_index].a) / 255.0;
                 }
             }
