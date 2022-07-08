@@ -18,7 +18,8 @@ pub fn build(b: *Builder) void {
     scanner.addSystemProtocol("stable/xdg-shell/xdg-shell.xml");
 
     scanner.generate("xdg_wm_base", 3);
-    scanner.generate("wl_compositor", 3);
+    scanner.generate("wl_compositor", 4);
+    scanner.generate("wl_seat", 7);
 
     const exe = b.addExecutable("vkwayland", "src/main.zig");
 

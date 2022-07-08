@@ -271,6 +271,9 @@ var wayland_client: WaylandClient = undefined;
 var alpha_mode: vk.CompositeAlphaFlagsKHR = .{ .opaque_bit_khr = true };
 var window_close_requested: bool = false;
 
+var mouse_coordinates = geometry.Coordinates2D(f64){ .x = 0.0, .y = 0.0 };
+var is_mouse_in_screen = false;
+
 var vertex_buffer_quad_count: u32 = 0;
 
 var texture_image_view: vk.ImageView = undefined;
@@ -1583,9 +1586,22 @@ const WaylandClient = struct {
     compositor: *wl.Compositor,
     xdg_wm_base: *xdg.WmBase,
     surface: *wl.Surface,
+    seat: *wl.Seat,
+    pointer: *wl.Pointer,
     frame_callback: *wl.Callback,
     xdg_toplevel: *xdg.Toplevel,
     xdg_surface: *xdg.Surface,
+};
+
+/// Wayland uses linux' input-event-codes for keys and buttons. When a mouse button is
+/// clicked one of these will be sent with the event.
+/// https://wayland-book.com/seat/pointer.html
+/// https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h
+const MouseButton = enum(c_int) {
+    left = 0x110,
+    right = 0x111,
+    middle = 0x112,
+    _
 };
 
 fn xdgWmBaseListener(xdg_wm_base: *xdg.WmBase, event: xdg.WmBase.Event, _: *WaylandClient) void {
@@ -1635,13 +1651,59 @@ fn frameListener(callback: *wl.Callback, event: wl.Callback.Event, client: *Wayl
     }
 }
 
+fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClient) void {
+    _ = client;
+    switch (event) {
+        .enter => |enter| {
+            is_mouse_in_screen = true;
+            mouse_coordinates.x = enter.surface_x.toDouble();
+            mouse_coordinates.y = enter.surface_y.toDouble();
+        },
+        .leave => |leave| {
+            _ = leave;
+            is_mouse_in_screen = false;
+        },
+        .motion => |motion| {
+            mouse_coordinates.x = motion.surface_x.toDouble();
+            mouse_coordinates.y = motion.surface_y.toDouble();
+        },
+        .button => |button| {
+            const mouse_button = @intToEnum(MouseButton, button.button);
+            std.log.info("Mouse: button {} {}", .{button.state, mouse_button});
+        },
+        .axis => |axis| {
+            std.log.info("Mouse: axis {} {}", .{axis.axis, axis.value.toDouble()});
+        },
+        .frame => |frame| {
+            _ = frame;
+        },
+        .axis_source => |axis_source| {
+            _ = axis_source;
+            std.log.info("Mouse: axis_source {}", .{axis_source.axis_source});
+        },
+        .axis_stop => |axis_stop| {
+            _ = axis_stop;
+            std.log.info("Mouse: axis_stop", .{});
+        },
+        .axis_discrete => |axis_discrete| {
+            _ = axis_discrete;
+            std.log.info("Mouse: axis_discrete", .{});
+        },
+    }
+}
+
 fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, client: *WaylandClient) void {
     switch (event) {
         .global => |global| {
+            std.log.info("Wayland: {s}", .{global.interface});
             if (std.cstr.cmp(global.interface, wl.Compositor.getInterface().name) == 0) {
                 client.compositor = registry.bind(global.name, wl.Compositor, 1) catch return;
             } else if (std.cstr.cmp(global.interface, xdg.WmBase.getInterface().name) == 0) {
                 client.xdg_wm_base = registry.bind(global.name, xdg.WmBase, 1) catch return;
+            } else if (std.cstr.cmp(global.interface, wl.Seat.getInterface().name) == 0) {
+                client.seat = registry.bind(global.name, wl.Seat, 7) catch return;
+                client.pointer = client.seat.getPointer() catch return;
+                client.pointer.setListener(*WaylandClient, pointerListener, &wayland_client);
             }
         },
         .global_remove => {},
