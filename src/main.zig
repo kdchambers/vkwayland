@@ -77,15 +77,15 @@ const transparancy_level = 0.0;
 
 /// Initial background color of application surface before transparency is applied
 /// Each color refers to a corner of the quad.
-var background_color_a = [4]graphics.RGB(f32) {
-    graphics.RGB(f32).fromInt(66, 77, 26),   // Top Left
-    graphics.RGB(f32).fromInt(65, 88, 200),  // Top Right
+var background_color_a = [4]graphics.RGB(f32){
+    graphics.RGB(f32).fromInt(66, 77, 26), // Top Left
+    graphics.RGB(f32).fromInt(65, 88, 200), // Top Right
     graphics.RGB(f32).fromInt(111, 89, 156), // Bottom Right
-    graphics.RGB(f32).fromInt(28, 52, 55),   // Bottom Left
+    graphics.RGB(f32).fromInt(28, 52, 55), // Bottom Left
 };
 
 /// Background color to transition to
-var background_color_b = [4]graphics.RGB(f32) {
+var background_color_b = [4]graphics.RGB(f32){
     graphics.RGB(f32).fromInt(255, 74, 255),
     graphics.RGB(f32).fromInt(65, 74, 255),
     graphics.RGB(f32).fromInt(73, 74, 111),
@@ -134,14 +134,14 @@ const vertex_shader_path = "../shaders/generic.vert.spv";
 // NOTE: The following points aren't used in the code, but are useful to know
 // http://anki3d.org/vulkan-coordinate-system/
 const ScreenPoint = geometry.Coordinates2D(ScreenNormalizedBaseType);
-const point_top_left = ScreenPoint{ .x = -1.0, .y = -1.0};
-const point_top_right = ScreenPoint{ .x = 1.0, .y = -1.0};
-const point_bottom_left = ScreenPoint{ .x = -1.0, .y = 1.0};
-const point_bottom_right = ScreenPoint{ .x = 1.0, .y = 1.0};
+const point_top_left = ScreenPoint{ .x = -1.0, .y = -1.0 };
+const point_top_right = ScreenPoint{ .x = 1.0, .y = -1.0 };
+const point_bottom_left = ScreenPoint{ .x = -1.0, .y = 1.0 };
+const point_bottom_right = ScreenPoint{ .x = 1.0, .y = 1.0 };
 
 /// Defines the entire surface area of a screen in vulkans coordinate system
 /// I.e normalized device coordinates right (ndc right)
-const full_screen_extent = geometry.Extent2D(ScreenNormalizedBaseType) {
+const full_screen_extent = geometry.Extent2D(ScreenNormalizedBaseType){
     .x = -1.0,
     .y = -1.0,
     .width = 2.0,
@@ -149,7 +149,7 @@ const full_screen_extent = geometry.Extent2D(ScreenNormalizedBaseType) {
 };
 
 /// Defines the entire surface area of a texture
-const full_texture_extent = geometry.Extent2D(TextureNormalizedBaseType) {
+const full_texture_extent = geometry.Extent2D(TextureNormalizedBaseType){
     .x = 0.0,
     .y = 0.0,
     .width = 1.0,
@@ -1263,7 +1263,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             const icon_type = @intToEnum(IconType, icon_path_i);
 
             if(icon_image.width != icon_image.width or icon_image.height != icon_image.height) {
-                std.log.err("Icon image for icon '{s}' has unexpected dimensions."
+                std.log.err("Icon image for icon '{}' has unexpected dimensions."
                          ++ "Icon assets may have gotten corrupted", .{icon_type});
                 return error.AssetIconsDimensionsMismatch;
             }
@@ -1271,13 +1271,13 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             const source_pixels = switch(icon_image.pixels.?) {
                 .rgba32 => |pixels| pixels,
                 else => {
-                    std.log.err("Icon images are expected to be in rgba32. Icon '{s}' may have gotten corrupted", .{icon_type});
+                    std.log.err("Icon images are expected to be in rgba32. Icon '{}' may have gotten corrupted", .{icon_type});
                     return error.AssetIconsFormatInvalid;
                 },
             };
 
             if(source_pixels.len != (icon_image.width * icon_image.height)) {
-                std.log.err("Loaded image for icon '{s}' has an unexpected number of pixels."
+                std.log.err("Loaded image for icon '{}' has an unexpected number of pixels."
                          ++ "This is a bug in the application", .{icon_type});
                 return error.AssetIconsMalformed;
             }
@@ -1643,7 +1643,7 @@ fn frameListener(callback: *wl.Callback, event: wl.Callback.Event, client: *Wayl
             is_render_requested = true;
             callback.destroy();
             client.frame_callback = client.surface.frame() catch |err| {
-                std.log.err("Failed to create new wayland frame -> {s}", .{err});
+                std.log.err("Failed to create new wayland frame -> {}", .{err});
                 return;
             };
             client.frame_callback.setListener(*WaylandClient, frameListener, client);
@@ -2599,9 +2599,9 @@ fn printVulkanQueueFamily(queue_family: vk.QueueFamilyProperties, comptime inden
     const base_indent = "  " ** indent_level;
     print(base_indent ++ "Queue count: {d}\n", .{queue_family.queue_count});
     print(base_indent ++ "Support\n", .{});
-    print(base_indent ++ "  Graphics: {s}\n", .{queue_family.queue_flags.graphics_bit});
-    print(base_indent ++ "  Transfer: {s}\n", .{queue_family.queue_flags.transfer_bit});
-    print(base_indent ++ "  Compute:  {s}\n", .{queue_family.queue_flags.compute_bit});
+    print(base_indent ++ "  Graphics: {}\n", .{queue_family.queue_flags.graphics_bit});
+    print(base_indent ++ "  Transfer: {}\n", .{queue_family.queue_flags.transfer_bit});
+    print(base_indent ++ "  Compute:  {}\n", .{queue_family.queue_flags.compute_bit});
 }
 
 fn printSurfaceCapabilities(surface_capabilities: vk.SurfaceCapabilitiesKHR, comptime indent_level: u32) void {
@@ -2625,24 +2625,24 @@ fn printSurfaceCapabilities(surface_capabilities: vk.SurfaceCapabilitiesKHR, com
 
     print(base_indent ++ "supported_usages\n", .{});
     const supported_usage_flags = surface_capabilities.supported_usage_flags;
-    print(base_indent ++ "  sampled:                          {s}\n", .{supported_usage_flags.sampled_bit});
-    print(base_indent ++ "  storage:                          {s}\n", .{supported_usage_flags.storage_bit});
-    print(base_indent ++ "  color_attachment:                 {s}\n", .{supported_usage_flags.color_attachment_bit});
-    print(base_indent ++ "  depth_stencil:                    {s}\n", .{supported_usage_flags.depth_stencil_attachment_bit});
-    print(base_indent ++ "  input_attachment:                 {s}\n", .{supported_usage_flags.input_attachment_bit});
-    print(base_indent ++ "  transient_attachment:             {s}\n", .{supported_usage_flags.transient_attachment_bit});
-    print(base_indent ++ "  fragment_shading_rate_attachment: {s}\n", .{supported_usage_flags.fragment_shading_rate_attachment_bit_khr});
-    print(base_indent ++ "  fragment_density_map:             {s}\n", .{supported_usage_flags.fragment_density_map_bit_ext});
-    print(base_indent ++ "  video_decode_dst:                 {s}\n", .{supported_usage_flags.video_decode_dst_bit_khr});
-    print(base_indent ++ "  video_decode_dpb:                 {s}\n", .{supported_usage_flags.video_decode_dpb_bit_khr});
-    print(base_indent ++ "  video_encode_src:                 {s}\n", .{supported_usage_flags.video_encode_src_bit_khr});
-    print(base_indent ++ "  video_encode_dpb:                 {s}\n", .{supported_usage_flags.video_encode_dpb_bit_khr});
+    print(base_indent ++ "  sampled:                          {}\n", .{supported_usage_flags.sampled_bit});
+    print(base_indent ++ "  storage:                          {}\n", .{supported_usage_flags.storage_bit});
+    print(base_indent ++ "  color_attachment:                 {}\n", .{supported_usage_flags.color_attachment_bit});
+    print(base_indent ++ "  depth_stencil:                    {}\n", .{supported_usage_flags.depth_stencil_attachment_bit});
+    print(base_indent ++ "  input_attachment:                 {}\n", .{supported_usage_flags.input_attachment_bit});
+    print(base_indent ++ "  transient_attachment:             {}\n", .{supported_usage_flags.transient_attachment_bit});
+    print(base_indent ++ "  fragment_shading_rate_attachment: {}\n", .{supported_usage_flags.fragment_shading_rate_attachment_bit_khr});
+    print(base_indent ++ "  fragment_density_map:             {}\n", .{supported_usage_flags.fragment_density_map_bit_ext});
+    print(base_indent ++ "  video_decode_dst:                 {}\n", .{supported_usage_flags.video_decode_dst_bit_khr});
+    print(base_indent ++ "  video_decode_dpb:                 {}\n", .{supported_usage_flags.video_decode_dpb_bit_khr});
+    print(base_indent ++ "  video_encode_src:                 {}\n", .{supported_usage_flags.video_encode_src_bit_khr});
+    print(base_indent ++ "  video_encode_dpb:                 {}\n", .{supported_usage_flags.video_encode_dpb_bit_khr});
 
     print(base_indent ++ "supportedCompositeAlpha:\n", .{});
-    print(base_indent ++ "  Opaque KHR      {s}\n", .{surface_capabilities.supported_composite_alpha.opaque_bit_khr});
-    print(base_indent ++ "  Pre Mult KHR    {s}\n", .{surface_capabilities.supported_composite_alpha.pre_multiplied_bit_khr});
-    print(base_indent ++ "  Post Mult KHR   {s}\n", .{surface_capabilities.supported_composite_alpha.post_multiplied_bit_khr});
-    print(base_indent ++ "  Inherit KHR     {s}\n", .{surface_capabilities.supported_composite_alpha.inherit_bit_khr});
+    print(base_indent ++ "  Opaque KHR      {}\n", .{surface_capabilities.supported_composite_alpha.opaque_bit_khr});
+    print(base_indent ++ "  Pre Mult KHR    {}\n", .{surface_capabilities.supported_composite_alpha.pre_multiplied_bit_khr});
+    print(base_indent ++ "  Post Mult KHR   {}\n", .{surface_capabilities.supported_composite_alpha.post_multiplied_bit_khr});
+    print(base_indent ++ "  Inherit KHR     {}\n", .{surface_capabilities.supported_composite_alpha.inherit_bit_khr});
 }
 
 //
