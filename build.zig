@@ -19,7 +19,7 @@ pub fn build(b: *Builder) void {
 
     scanner.generate("xdg_wm_base", 3);
     scanner.generate("wl_compositor", 4);
-    scanner.generate("wl_seat", 7);
+    scanner.generate("wl_seat", 5);
 
     const exe = b.addExecutable("vkwayland", "src/main.zig");
 
@@ -27,9 +27,14 @@ pub fn build(b: *Builder) void {
     exe.setBuildMode(mode);
 
     exe.addIncludeDir("deps/wayland/");
-    
+
     const gen = vkgen.VkGenerateStep.init(b, "deps/vk.xml", "vk.zig");
     const vulkan_pkg = gen.package;
+
+    exe.addPackage(.{
+        .name = "shaders",
+        .source = .{ .path = "shaders/shaders.zig" },
+    });
 
     exe.addPackage(.{
         .name = "wayland",
@@ -40,7 +45,6 @@ pub fn build(b: *Builder) void {
     exe.addPackagePath("zigimg", "deps/zigimg/zigimg.zig");
 
     exe.linkLibC();
-    exe.linkSystemLibrary("vulkan");
     exe.linkSystemLibrary("wayland-client");
 
     // NOTE: Taken from https://github.com/ifreund/hello-zig-wayland/blob/master/build.zig

@@ -2,13 +2,19 @@
 // Copyright (c) 2022 Keith Chambers
 
 const std = @import("std");
+const builtin = @import("builtin");
 const vk = @import("vulkan");
 const vulkan_config = @import("vulkan_config.zig");
 const img = @import("zigimg");
+const shaders = @import("shaders");
 
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
+
+const clib = @cImport({
+    @cInclude("dlfcn.h");
+});
 
 // TODO:
 // - Audit memory allocation overall
@@ -299,13 +305,14 @@ var fastest_frame_ns: u64 = std.math.maxInt(u64);
 var frame_duration_total_ns: u64 = 0;
 var frame_duration_awake_ns: u64 = 0;
 
+var vkGetInstanceProcAddr: *const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction = undefined;
+
 //
 //   3. Core Types + Functions
 //
 
 pub const VKProc = fn () callconv(.C) void;
 
-extern fn vkGetInstanceProcAddr(instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction;
 extern fn vkGetPhysicalDevicePresentationSupport(instance: vk.Instance, pdev: vk.PhysicalDevice, queuefamily: u32) c_int;
 
 const ScreenPixelBaseType = u16;
@@ -418,7 +425,7 @@ fn QuadFaceWriter(comptime VertexType: type) type {
 }
 
 const graphics = struct {
-    fn TypeOfField(t: anytype, field_name: []const u8) type {
+    fn TypeOfField(comptime t: anytype, comptime field_name: []const u8) type {
         for (@typeInfo(t).Struct.fields) |field| {
             if (std.mem.eql(u8, field.name, field_name)) {
                 return field.field_type;
@@ -844,6 +851,31 @@ fn draw() !void {
 fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     try waylandSetup();
 
+    // Windows:        vulkan-1.dll
+    // Apple:          libvulkan.1.dylib
+    // OpenBSD/NetBSD: libvulkan.so
+    // Rest:           libvulkan.so.1
+    const vulkan_lib_symbol = comptime switch(builtin.os.tag) {
+        .windows => "vulkan-1.dll",
+        .macos => "libvulkan.1.dylib",
+        .netbsd, .openbsd => "libvulkan.so",
+        else => "libvulkan.so.1",
+    };
+
+    if (clib.dlopen(vulkan_lib_symbol, clib.RTLD_NOW)) |vulkan_loader| {
+        const vk_get_instance_proc_addr_fn_opt = @ptrCast(?*const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction, clib.dlsym(vulkan_loader, "vkGetInstanceProcAddr"));
+        if (vk_get_instance_proc_addr_fn_opt) |vk_get_instance_proc_addr_fn| {
+            vkGetInstanceProcAddr = vk_get_instance_proc_addr_fn;
+            app.base_dispatch = try vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
+        } else {
+            std.log.err("Failed to load vkGetInstanceProcAddr function from vulkan loader", .{});
+            return error.FailedToGetVulkanSymbol;
+        }
+    } else {
+        std.log.err("Failed to load vulkan loader (libvulkan.so)", .{});
+        return error.FailedToGetVulkanSymbol;
+    }
+
     app.base_dispatch = try vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
     
     app.instance = try app.base_dispatch.createInstance(&vk.InstanceCreateInfo{
@@ -1257,7 +1289,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         // TODO: This could be done on another thread
         for(icon_path_list) |icon_path, icon_path_i| {
             // TODO: Create an  arena / allocator of a fixed size that can be reused here.
-            const icon_image = try img.Image.fromFilePath(allocator, icon_path);
+            var icon_image = try img.Image.fromFilePath(allocator, icon_path);
             defer icon_image.deinit();
 
             const icon_type = @intToEnum(IconType, icon_path_i);
@@ -1268,7 +1300,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                 return error.AssetIconsDimensionsMismatch;
             }
 
-            const source_pixels = switch(icon_image.pixels.?) {
+            const source_pixels = switch(icon_image.pixels) {
                 .rgba32 => |pixels| pixels,
                 else => {
                     std.log.err("Icon images are expected to be in rgba32. Icon '{}' may have gotten corrupted", .{icon_type});
@@ -1551,8 +1583,8 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         i += 1;
     }
 
-    app.vertex_shader_module = try createVertexShaderModule(app.*, vertex_shader_path);
-    app.fragment_shader_module = try createFragmentShaderModule(app.*, fragment_shader_path);
+    app.vertex_shader_module = try createVertexShaderModule(app.*);
+    app.fragment_shader_module = try createFragmentShaderModule(app.*);
 
     std.debug.assert(app.swapchain_images.len > 0);
 
@@ -1678,7 +1710,6 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             _ = frame;
         },
         .axis_source => |axis_source| {
-            _ = axis_source;
             std.log.info("Mouse: axis_source {}", .{axis_source.axis_source});
         },
         .axis_stop => |axis_stop| {
@@ -2487,21 +2518,19 @@ fn createFramebuffers(allocator: std.mem.Allocator, app: GraphicsContext) ![]vk.
 //   6. Vulkan Util / Wrapper Functions
 //
 
-fn createFragmentShaderModule(app: GraphicsContext, comptime shader_path: []const u8) !vk.ShaderModule {
-    const shader_fragment_spv align(4) = @embedFile(shader_path);
+fn createFragmentShaderModule(app: GraphicsContext) !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
-        .code_size = shader_fragment_spv.len,
-        .p_code = @ptrCast([*]const u32, shader_fragment_spv),
+        .code_size = shaders.fragment_spv.len,
+        .p_code = @ptrCast([*]const u32, shaders.fragment_spv),
         .flags = .{},
     };
     return try app.device_dispatch.createShaderModule(app.logical_device, &create_info, null);
 }
 
-fn createVertexShaderModule(app: GraphicsContext, comptime shader_path: []const u8) !vk.ShaderModule {
-    const shader_vertex_spv align(4) = @embedFile(shader_path);
+fn createVertexShaderModule(app: GraphicsContext) !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
-        .code_size = shader_vertex_spv.len,
-        .p_code = @ptrCast([*]const u32, shader_vertex_spv),
+        .code_size = shaders.vertex_spv.len,
+        .p_code = @ptrCast([*]const u32, shaders.vertex_spv),
         .flags = .{},
     };
     return try app.device_dispatch.createShaderModule(app.logical_device, &create_info, null);
