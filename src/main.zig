@@ -11,6 +11,7 @@ const shaders = @import("shaders");
 const wayland = @import("wayland");
 const wl = wayland.client.wl;
 const xdg = wayland.client.xdg;
+const zxdg = wayland.client.zxdg;
 
 const clib = @cImport({
     @cInclude("dlfcn.h");
@@ -290,6 +291,7 @@ var texture_indices_buffer: vk.Buffer = undefined;
 var texture_memory_map: [*]graphics.RGBA(f32) = undefined;
 
 var background_color_loop_time_base: i64 = undefined;
+var draw_window_decorations_requested: bool = true;
 
 /// Pointer to quad that will be reused to control the background color of the application
 /// An alternative method, would be to use the clear_colors parameter when recording a render pass
@@ -1735,6 +1737,12 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, client: *W
                 client.seat = registry.bind(global.name, wl.Seat, 7) catch return;
                 client.pointer = client.seat.getPointer() catch return;
                 client.pointer.setListener(*WaylandClient, pointerListener, &wayland_client);
+            } else if (std.cstr.cmp(global.interface, zxdg.DecorationManagerV1.getInterface().name) == 0) {
+                //
+                // TODO: Negociate with compositor how the window decorations will be drawn
+                //
+                draw_window_decorations_requested = false;
+                std.debug.assert(false);
             }
         },
         .global_remove => {},

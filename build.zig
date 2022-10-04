@@ -16,10 +16,13 @@ pub fn build(b: *Builder) void {
 
     const scanner = ScanProtocolsStep.create(b);
     scanner.addSystemProtocol("stable/xdg-shell/xdg-shell.xml");
+    scanner.addSystemProtocol("unstable/xdg-decoration/xdg-decoration-unstable-v1.xml");
 
     scanner.generate("xdg_wm_base", 3);
     scanner.generate("wl_compositor", 4);
     scanner.generate("wl_seat", 5);
+
+    scanner.generate("zxdg_decoration_manager_v1", 1);
 
     const exe = b.addExecutable("vkwayland", "src/main.zig");
 
