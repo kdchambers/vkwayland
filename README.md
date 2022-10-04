@@ -18,20 +18,20 @@ Furthermore, questions and discussions are in scope for the project. Feel free t
 
 ### Features
 
-- Self contained in mostly one source file
-- Wayland driven loop (Should correspond to monitors selected display rate and properties)
+- Mostly self-contained within a ~3k loc source file
+- Animated background (Color smoothly updates each frame)
+- [Client-side](https://en.wikipedia.org/wiki/Client-side_decoration) decorations for compositors that don't support drawing window decorations on behalf of application (E.g Gnome / mutter)
 - Vulkan specfic wayland integration (Not using waylands shared memory buffer interface)
 - Proper (mostly) querying of vulkan objects (Devices, memory, etc)
 - Vulkan synchonization that doesn't rely on deviceWaitIdle (Except on shutdown)
 - Dynamic viewport + scissor for more efficient swapchain recreation
 - Image loading and texture sampling
 - Surface transparency
+- Window movement
 
 ### Roadmap
 
-- [ ] Wayland: Input (keyboard and mouse)
-- [ ] Wayland: Set mouse icon
-- [ ] Wayland: Draw window decoration
+- [ ] Wayland: Custom mouse icons
 - [ ] Wayland: Toggle fullscreen
 - [ ] Vulkan: Select a separate memory type for texture data (Currently reuses mesh memory type)
 - [ ] Vulkan: TextureArray usage using push constants + multiple draw commands
@@ -40,7 +40,7 @@ Furthermore, questions and discussions are in scope for the project. Feel free t
 ## Requirements 
 
 - Master build of [zig](https://github.com/ziglang/zig).
-- Wayland system (river, sway, etc)
+- Wayland system (mutter, river, sway, etc)
 
 ## Running 
 
