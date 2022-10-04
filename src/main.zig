@@ -102,7 +102,13 @@ var background_color_b = [4]graphics.RGB(f32){
 const window_decorations = struct {
     const height_pixels = 40;
     const color = graphics.RGBA(f32).fromInt(u8, 200, 200, 200, 255);
+    const exit_button = struct {
+        const size_pixels = 24;
+    };
 };
+
+/// When clicked, terminate the application
+var exit_button_extent: geometry.Extent2D(f32) = undefined;
 
 /// The time in milliseconds for the background color to change
 /// from color a to b, then back to a
@@ -841,17 +847,49 @@ fn draw() !void {
 
     var face_writer = quad_face_writer_pool.create(1, (vertices_range_size - 1) / @sizeOf(graphics.GenericVertex));
     if(draw_window_decorations_requested) {
-        const height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
-        const extent = geometry.Extent2D(f32) {
-            .x = -1.0,
-            .y = -1.0,
-            .width = 2.0,
-            .height = height,
-        };
-        (try face_writer.create()).* = graphics.generateQuadColored(graphics.GenericVertex, extent, window_decorations.color, .top_left);
+        var faces = try face_writer.allocate(2);
+        const window_decoration_height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
+        {
+            //
+            // Draw window decoration topbar background
+            //
+            const extent = geometry.Extent2D(f32) {
+                .x = -1.0,
+                .y = -1.0,
+                .width = 2.0,
+                .height = window_decoration_height,
+            };
+            faces[0] = graphics.generateQuadColored(graphics.GenericVertex, extent, window_decorations.color, .top_left);
+        }
+        {
+            //
+            // Draw exit button in window decoration topbar
+            //
+            std.debug.assert(window_decorations.exit_button.size_pixels <= window_decorations.height_pixels);
+            const screen_icon_dimensions = geometry.Dimensions2D(f32) {
+                .width = @intToFloat(f32, window_decorations.exit_button.size_pixels * 2) / @intToFloat(f32, screen_dimensions.width),
+                .height = @intToFloat(f32, window_decorations.exit_button.size_pixels * 2) / @intToFloat(f32, screen_dimensions.height),
+            };
+            const exit_button_outer_margin_pixels = @intToFloat(f32, window_decorations.height_pixels - window_decorations.exit_button.size_pixels) / 2.0;
+            const outer_margin_hor = exit_button_outer_margin_pixels * 2.0 / @intToFloat(f32, screen_dimensions.width);
+            const outer_margin_ver = exit_button_outer_margin_pixels * 2.0 / @intToFloat(f32, screen_dimensions.height);
+            const texture_coordinates = iconTextureLookup(.close);
+            const texture_extent = geometry.Extent2D(f32) {
+                .x = texture_coordinates.x,
+                .y = texture_coordinates.y,
+                .width = @intToFloat(f32, icon_dimensions.width) / @intToFloat(f32, texture_layer_dimensions.width),
+                .height = @intToFloat(f32, icon_dimensions.height) / @intToFloat(f32, texture_layer_dimensions.height),
+            };
+            const extent = geometry.Extent2D(f32) {
+                .x = 1.0 - (outer_margin_hor + screen_icon_dimensions.width),
+                .y = -1.0 + outer_margin_ver,
+                .width = screen_icon_dimensions.width,
+                .height = screen_icon_dimensions.height,
+            };
+            faces[1] = graphics.generateTexturedQuad(graphics.GenericVertex, extent, texture_extent, .top_left);
+        }
     }
     var faces = try face_writer.allocate(horizonal_count * vertical_count);
-
     var horizonal_i: u32 = 0;
     while(horizonal_i < horizonal_count) : (horizonal_i += 1) {
         var vertical_i: u32 = 0;
@@ -875,7 +913,7 @@ fn draw() !void {
     }
     vertex_buffer_quad_count = 1 + (horizonal_count * vertical_count);
     if(draw_window_decorations_requested) {
-        vertex_buffer_quad_count += 1;
+        vertex_buffer_quad_count += 2;
     }
 }
 
