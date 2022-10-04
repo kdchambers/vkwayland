@@ -99,6 +99,11 @@ var background_color_b = [4]graphics.RGB(f32){
     graphics.RGB(f32).fromInt(133, 74, 255),
 };
 
+const window_decorations = struct {
+    const height_pixels = 20;
+    const color = graphics.RGBA(f32).fromInt(u8, 200, 200, 200, 255);
+};
+
 /// The time in milliseconds for the background color to change
 /// from color a to b, then back to a
 const background_color_loop_ms: u32 = 1000 * 10;
@@ -784,15 +789,24 @@ fn draw() !void {
         .height = icon_dimensions.height,
     };
 
-    const insufficient_horizontal_space = (screen_dimensions.width < (dimensions_pixels.width + outer_margin_pixels * 2));
-    const insufficient_vertical_space = (screen_dimensions.height < (dimensions_pixels.height + outer_margin_pixels * 2));
+    if(draw_window_decorations_requested and screen_dimensions.height <= window_decorations.height_pixels) {
+        vertex_buffer_quad_count = 0;
+        return;
+    }
+
+    const available_screen_dimensions = if(draw_window_decorations_requested) 
+        geometry.Dimensions2D(u16){ .height = screen_dimensions.height - window_decorations.height_pixels, .width = screen_dimensions.width} 
+    else screen_dimensions;
+
+    const insufficient_horizontal_space = (available_screen_dimensions.width < (dimensions_pixels.width + outer_margin_pixels * 2));
+    const insufficient_vertical_space = (available_screen_dimensions.height < (dimensions_pixels.height + outer_margin_pixels * 2));
 
     if(insufficient_horizontal_space or insufficient_vertical_space) {
         vertex_buffer_quad_count = 0;
         return;
     }
 
-    var horizonal_quad_space_pixels = (screen_dimensions.width - (outer_margin_pixels * 2)) - dimensions_pixels.width;
+    var horizonal_quad_space_pixels = (available_screen_dimensions.width - (outer_margin_pixels * 2)) - dimensions_pixels.width;
     var horizonal_count: u32 = 1;
 
     {
@@ -803,7 +817,7 @@ fn draw() !void {
         }
     }
 
-    var vertical_quad_space_pixels: u32 = (screen_dimensions.height - (outer_margin_pixels * 2)) - dimensions_pixels.height;
+    var vertical_quad_space_pixels: u32 = (available_screen_dimensions.height - (outer_margin_pixels * 2)) - dimensions_pixels.height;
     var vertical_count: u32 = 1;
 
     {
@@ -814,16 +828,28 @@ fn draw() !void {
         }
     }
 
+    const y_offset_window_decorations: u32 = if(draw_window_decorations_requested) window_decorations.height_pixels else 0;
+
     const x_begin_pixels = outer_margin_pixels + (horizonal_quad_space_pixels / 2);
-    const y_begin_pixels = outer_margin_pixels + (vertical_quad_space_pixels / 2);
+    const y_begin_pixels = y_offset_window_decorations + outer_margin_pixels + (vertical_quad_space_pixels / 2);
 
-    const x_begin = -1.0 + (@intToFloat(f32, x_begin_pixels * 2) / @intToFloat(f32, screen_dimensions.width));
-    const y_begin = -1.0 + (@intToFloat(f32, y_begin_pixels * 2) / @intToFloat(f32, screen_dimensions.height));
+    const x_begin = -1.0 + (@intToFloat(f32, x_begin_pixels * 2) / @intToFloat(f32, available_screen_dimensions.width));
+    const y_begin = -1.0 + (@intToFloat(f32, y_begin_pixels * 2) / @intToFloat(f32, available_screen_dimensions.height));
 
-    const stride_horizonal = @intToFloat(f32, (dimensions_pixels.width + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.width);
-    const stride_vertical = @intToFloat(f32, (dimensions_pixels.height + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.height);
+    const stride_horizonal = @intToFloat(f32, (dimensions_pixels.width + inner_margin_pixels) * 2) / @intToFloat(f32, available_screen_dimensions.width);
+    const stride_vertical = @intToFloat(f32, (dimensions_pixels.height + inner_margin_pixels) * 2) / @intToFloat(f32, available_screen_dimensions.height);
 
     var face_writer = quad_face_writer_pool.create(1, (vertices_range_size - 1) / @sizeOf(graphics.GenericVertex));
+    if(draw_window_decorations_requested) {
+        const height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, available_screen_dimensions.width);
+        const extent = geometry.Extent2D(f32) {
+            .x = -1.0,
+            .y = -1.0,
+            .width = 2.0,
+            .height = height,
+        };
+        (try face_writer.create()).* = graphics.generateQuadColored(graphics.GenericVertex, extent, window_decorations.color, .top_left);
+    }
     var faces = try face_writer.allocate(horizonal_count * vertical_count);
 
     var horizonal_i: u32 = 0;
@@ -833,8 +859,8 @@ fn draw() !void {
             const extent = geometry.Extent2D(f32) {
                 .x = x_begin + (stride_horizonal * @intToFloat(f32, horizonal_i)),
                 .y = y_begin + (stride_vertical * @intToFloat(f32, vertical_i)),
-                .width = (@intToFloat(f32, dimensions_pixels.width) / @intToFloat(f32, screen_dimensions.width)) * 2.0,
-                .height = (@intToFloat(f32, dimensions_pixels.height) / @intToFloat(f32, screen_dimensions.height)) * 2.0,
+                .width = (@intToFloat(f32, dimensions_pixels.width) / @intToFloat(f32, available_screen_dimensions.width)) * 2.0,
+                .height = (@intToFloat(f32, dimensions_pixels.height) / @intToFloat(f32, available_screen_dimensions.height)) * 2.0,
             };
             const face_index = horizonal_i + (vertical_i * horizonal_count);
             const texture_coordinates = iconTextureLookup(@intToEnum(IconType, face_index % icon_path_list.len));
@@ -848,6 +874,9 @@ fn draw() !void {
         }
     }
     vertex_buffer_quad_count = 1 + (horizonal_count * vertical_count);
+    if(draw_window_decorations_requested) {
+        vertex_buffer_quad_count += 1;
+    }
 }
 
 fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
