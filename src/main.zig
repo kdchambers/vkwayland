@@ -50,8 +50,8 @@ pub const log_level: std.log.Level = .info;
 /// Initial values are arbirary and will be updated once the wayland
 /// server reports a change
 var screen_dimensions = geometry.Dimensions2D(ScreenPixelBaseType){
-    .width = 640,
-    .height = 1040,
+    .width = 1040,
+    .height = 640,
 };
 
 /// Determines the memory allocated for storing mesh data
@@ -100,7 +100,7 @@ var background_color_b = [4]graphics.RGB(f32){
 };
 
 const window_decorations = struct {
-    const height_pixels = 20;
+    const height_pixels = 40;
     const color = graphics.RGBA(f32).fromInt(u8, 200, 200, 200, 255);
 };
 
@@ -833,15 +833,15 @@ fn draw() !void {
     const x_begin_pixels = outer_margin_pixels + (horizonal_quad_space_pixels / 2);
     const y_begin_pixels = y_offset_window_decorations + outer_margin_pixels + (vertical_quad_space_pixels / 2);
 
-    const x_begin = -1.0 + (@intToFloat(f32, x_begin_pixels * 2) / @intToFloat(f32, available_screen_dimensions.width));
-    const y_begin = -1.0 + (@intToFloat(f32, y_begin_pixels * 2) / @intToFloat(f32, available_screen_dimensions.height));
+    const x_begin = -1.0 + (@intToFloat(f32, x_begin_pixels * 2) / @intToFloat(f32, screen_dimensions.width));
+    const y_begin = -1.0 + (@intToFloat(f32, y_begin_pixels * 2) / @intToFloat(f32, screen_dimensions.height));
 
-    const stride_horizonal = @intToFloat(f32, (dimensions_pixels.width + inner_margin_pixels) * 2) / @intToFloat(f32, available_screen_dimensions.width);
-    const stride_vertical = @intToFloat(f32, (dimensions_pixels.height + inner_margin_pixels) * 2) / @intToFloat(f32, available_screen_dimensions.height);
+    const stride_horizonal = @intToFloat(f32, (dimensions_pixels.width + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.width);
+    const stride_vertical = @intToFloat(f32, (dimensions_pixels.height + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.height);
 
     var face_writer = quad_face_writer_pool.create(1, (vertices_range_size - 1) / @sizeOf(graphics.GenericVertex));
     if(draw_window_decorations_requested) {
-        const height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, available_screen_dimensions.width);
+        const height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
         const extent = geometry.Extent2D(f32) {
             .x = -1.0,
             .y = -1.0,
@@ -859,8 +859,8 @@ fn draw() !void {
             const extent = geometry.Extent2D(f32) {
                 .x = x_begin + (stride_horizonal * @intToFloat(f32, horizonal_i)),
                 .y = y_begin + (stride_vertical * @intToFloat(f32, vertical_i)),
-                .width = (@intToFloat(f32, dimensions_pixels.width) / @intToFloat(f32, available_screen_dimensions.width)) * 2.0,
-                .height = (@intToFloat(f32, dimensions_pixels.height) / @intToFloat(f32, available_screen_dimensions.height)) * 2.0,
+                .width = (@intToFloat(f32, dimensions_pixels.width) / @intToFloat(f32, screen_dimensions.width)) * 2.0,
+                .height = (@intToFloat(f32, dimensions_pixels.height) / @intToFloat(f32, screen_dimensions.height)) * 2.0,
             };
             const face_index = horizonal_i + (vertical_i * horizonal_count);
             const texture_coordinates = iconTextureLookup(@intToEnum(IconType, face_index % icon_path_list.len));
@@ -882,10 +882,6 @@ fn draw() !void {
 fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     try waylandSetup();
 
-    // Windows:        vulkan-1.dll
-    // Apple:          libvulkan.1.dylib
-    // OpenBSD/NetBSD: libvulkan.so
-    // Rest:           libvulkan.so.1
     const vulkan_lib_symbol = comptime switch(builtin.os.tag) {
         .windows => "vulkan-1.dll",
         .macos => "libvulkan.1.dylib",
@@ -1715,7 +1711,6 @@ fn frameListener(callback: *wl.Callback, event: wl.Callback.Event, client: *Wayl
 }
 
 fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClient) void {
-    _ = client;
     switch (event) {
         .enter => |enter| {
             is_mouse_in_screen = true;
@@ -1733,6 +1728,14 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
         .button => |button| {
             const mouse_button = @intToEnum(MouseButton, button.button);
             std.log.info("Mouse: button {} {}", .{button.state, mouse_button});
+            if(draw_window_decorations_requested and mouse_button == .left) {
+                // Start interactive window move if mouse coordinates are in window decorations bounds
+                std.log.info("Mouse coordinates: {d:.4}, {d:.4}", .{mouse_coordinates.x, mouse_coordinates.y});
+                if(@floatToInt(u32, mouse_coordinates.y) <= window_decorations.height_pixels) {
+                    std.log.info("Starting move", .{});
+                    client.xdg_toplevel.move(client.seat, button.serial);
+                }
+            }
         },
         .axis => |axis| {
             std.log.info("Mouse: axis {} {}", .{axis.axis, axis.value.toDouble()});
