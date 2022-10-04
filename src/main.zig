@@ -104,11 +104,9 @@ const window_decorations = struct {
     const color = graphics.RGBA(f32).fromInt(u8, 200, 200, 200, 255);
     const exit_button = struct {
         const size_pixels = 24;
+        const color_hovered = graphics.RGBA(f32).fromInt(u8, 180, 180, 180, 255);
     };
 };
-
-/// When clicked, terminate the application
-var exit_button_extent: geometry.Extent2D(f32) = undefined;
 
 /// The time in milliseconds for the background color to change
 /// from color a to b, then back to a
@@ -269,6 +267,7 @@ const surface_extensions = [_][*:0]const u8{ "VK_KHR_surface", "VK_KHR_wayland_s
 
 var is_draw_required: bool = true;
 var is_render_requested: bool = true;
+var is_shutdown_requested: bool = false;
 
 /// Set when command buffers need to be (re)recorded. The following will cause that to happen
 ///   1. First command buffer recording
@@ -287,7 +286,6 @@ var mapped_device_memory: [*]u8 = undefined;
 
 var wayland_client: WaylandClient = undefined;
 var alpha_mode: vk.CompositeAlphaFlagsKHR = .{ .opaque_bit_khr = true };
-var window_close_requested: bool = false;
 
 var mouse_coordinates = geometry.Coordinates2D(f64){ .x = 0.0, .y = 0.0 };
 var is_mouse_in_screen = false;
@@ -317,6 +315,11 @@ var slowest_frame_ns: u64 = 0;
 var fastest_frame_ns: u64 = std.math.maxInt(u64);
 var frame_duration_total_ns: u64 = 0;
 var frame_duration_awake_ns: u64 = 0;
+
+/// When clicked, terminate the application
+var exit_button_extent: geometry.Extent2D(u16) = undefined;
+var exit_button_background_quad: *graphics.QuadFace(graphics.GenericVertex) = undefined;
+var exit_button_hovered: bool = false;
 
 var vkGetInstanceProcAddr: *const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction = undefined;
 
@@ -614,6 +617,12 @@ const geometry = struct {
             y: BaseType,
             height: BaseType,
             width: BaseType,
+
+            inline fn isWithinBounds(self: @This(), comptime T: type, point: T) bool {
+                const end_x = self.x + self.width;
+                const end_y = self.y + self.height;
+                return (point.x >= self.x and point.y >= self.y and point.x <= end_x and point.y <= end_y);
+            }
         };
     }
 };
@@ -667,7 +676,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     background_color_loop_time_base = std.time.milliTimestamp();
 
-    while (!window_close_requested) {
+    while (!is_shutdown_requested) {
         frame_count += 1;
 
         const frame_start_ns = std.time.nanoTimestamp();
@@ -847,7 +856,7 @@ fn draw() !void {
 
     var face_writer = quad_face_writer_pool.create(1, (vertices_range_size - 1) / @sizeOf(graphics.GenericVertex));
     if(draw_window_decorations_requested) {
-        var faces = try face_writer.allocate(2);
+        var faces = try face_writer.allocate(3);
         const window_decoration_height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
         {
             //
@@ -886,7 +895,18 @@ fn draw() !void {
                 .width = screen_icon_dimensions.width,
                 .height = screen_icon_dimensions.height,
             };
-            faces[1] = graphics.generateTexturedQuad(graphics.GenericVertex, extent, texture_extent, .top_left);
+            faces[1] = graphics.generateQuadColored(graphics.GenericVertex, extent, window_decorations.color, .top_left);
+            faces[2] = graphics.generateTexturedQuad(graphics.GenericVertex, extent, texture_extent, .top_left);
+
+            // TODO: Update on screen size change
+            const exit_button_extent_outer_margin = @divExact(window_decorations.height_pixels - window_decorations.exit_button.size_pixels, 2);
+            exit_button_extent = geometry.Extent2D(u16) { // Top left anchor
+                .x = screen_dimensions.width - (window_decorations.exit_button.size_pixels + exit_button_extent_outer_margin),
+                .y = screen_dimensions.height - (window_decorations.exit_button.size_pixels + exit_button_extent_outer_margin),
+                .width = window_decorations.exit_button.size_pixels,
+                .height = window_decorations.exit_button.size_pixels,
+            };
+            exit_button_background_quad = &faces[1];
         }
     }
     var faces = try face_writer.allocate(horizonal_count * vertical_count);
@@ -913,7 +933,7 @@ fn draw() !void {
     }
     vertex_buffer_quad_count = 1 + (horizonal_count * vertical_count);
     if(draw_window_decorations_requested) {
-        vertex_buffer_quad_count += 2;
+        vertex_buffer_quad_count += 3;
     }
 }
 
@@ -1762,16 +1782,46 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
         .motion => |motion| {
             mouse_coordinates.x = motion.surface_x.toDouble();
             mouse_coordinates.y = motion.surface_y.toDouble();
+
+            const end_x = exit_button_extent.x + exit_button_extent.width;
+            const end_y = exit_button_extent.y + exit_button_extent.height;
+            const mouse_x = @floatToInt(u16, mouse_coordinates.x);
+            const mouse_y = screen_dimensions.height - @floatToInt(u16, mouse_coordinates.y);
+            const is_within_bounds = (mouse_x >= exit_button_extent.x and mouse_y >= exit_button_extent.y and mouse_x <= end_x and mouse_y <= end_y);
+
+            if(is_within_bounds and !exit_button_hovered) {
+                exit_button_background_quad[0].color = window_decorations.exit_button.color_hovered;
+                exit_button_background_quad[1].color = window_decorations.exit_button.color_hovered;
+                exit_button_background_quad[2].color = window_decorations.exit_button.color_hovered;
+                exit_button_background_quad[3].color = window_decorations.exit_button.color_hovered;
+                is_render_requested = true;
+                exit_button_hovered = true;
+            }
+
+            if(!is_within_bounds and exit_button_hovered) {
+                exit_button_background_quad[0].color = window_decorations.color;
+                exit_button_background_quad[1].color = window_decorations.color;
+                exit_button_background_quad[2].color = window_decorations.color;
+                exit_button_background_quad[3].color = window_decorations.color;
+                is_render_requested = true;
+                exit_button_hovered = false;
+            }
         },
         .button => |button| {
             const mouse_button = @intToEnum(MouseButton, button.button);
-            std.log.info("Mouse: button {} {}", .{button.state, mouse_button});
             if(draw_window_decorations_requested and mouse_button == .left) {
                 // Start interactive window move if mouse coordinates are in window decorations bounds
-                std.log.info("Mouse coordinates: {d:.4}, {d:.4}", .{mouse_coordinates.x, mouse_coordinates.y});
                 if(@floatToInt(u32, mouse_coordinates.y) <= window_decorations.height_pixels) {
-                    std.log.info("Starting move", .{});
                     client.xdg_toplevel.move(client.seat, button.serial);
+                }
+                const end_x = exit_button_extent.x + exit_button_extent.width;
+                const end_y = exit_button_extent.y + exit_button_extent.height;
+                const mouse_x = @floatToInt(u16, mouse_coordinates.x);
+                const mouse_y = screen_dimensions.height - @floatToInt(u16, mouse_coordinates.y);
+                const is_within_bounds = (mouse_x >= exit_button_extent.x and mouse_y >= exit_button_extent.y and mouse_x <= end_x and mouse_y <= end_y);
+                if(is_within_bounds) {
+                    std.log.info("Close button clicked. Shutdown requested.", .{});
+                    is_shutdown_requested = true;
                 }
             }
         },
@@ -1835,7 +1885,7 @@ fn waylandSetup() !void {
     wayland_client.xdg_surface.setListener(*wl.Surface, xdgSurfaceListener, wayland_client.surface);
 
     wayland_client.xdg_toplevel = try wayland_client.xdg_surface.getToplevel();
-    wayland_client.xdg_toplevel.setListener(*bool, xdgToplevelListener, &window_close_requested);
+    wayland_client.xdg_toplevel.setListener(*bool, xdgToplevelListener, &is_shutdown_requested);
 
     wayland_client.frame_callback = try wayland_client.surface.frame();
     wayland_client.frame_callback.setListener(*WaylandClient, frameListener, &wayland_client);
