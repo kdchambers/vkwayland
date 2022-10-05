@@ -6,21 +6,20 @@
 
 ### Goals
 
-- Easy to read and understand the code, without heavy abstractions
-- Make use of most typical vulkan / wayland functionality
-- Avoid unrelated complexity that detracts from the learning goal
+- Easy to read and understand the code (Avoiding heavy abstractions or unrelated cruft)
+- Make use of typical vulkan / wayland functionality
 - Be performant and correct
 - A common place to iron out best practices
 
-I'm not an expert in either vulkan or wayland, so audits are welcome as well as additional feature requests that show usage of a new aspect of either tech. 
+I'm not an expert in vulkan or wayland, so audits are welcome.
 
-Furthermore, questions and discussions are in scope for the project. Feel free to open an issue around a topic.
+Additionally, feature requests, questions and discussions are in scope for the project. Feel free to open an issue around a topic.
 
 ### Features
 
 - Mostly self-contained within a ~3k loc source file
 - Animated background (Color smoothly updates each frame)
-- [Client-side](https://en.wikipedia.org/wiki/Client-side_decoration) decorations for compositors that don't support drawing window decorations on behalf of application (E.g Gnome / mutter)
+- [Client-side](https://en.wikipedia.org/wiki/Client-side_decoration) window decorations for compositors that don't support drawing them on behalf of application (E.g Gnome / mutter)
 - Updates cursor icon when application surface is entered
 - Vulkan specfic wayland integration (Not using waylands shared memory buffer interface)
 - Proper (mostly) querying of vulkan objects (Devices, memory, etc)
@@ -29,13 +28,6 @@ Furthermore, questions and discussions are in scope for the project. Feel free t
 - Image loading and texture sampling
 - Surface transparency
 - Window movement and resizing
-
-### Roadmap
-
-- [ ] Wayland: Toggle fullscreen
-- [ ] Vulkan: Select a separate memory type for texture data (Currently reuses mesh memory type)
-- [ ] Vulkan: TextureArray usage using push constants + multiple draw commands
-- [ ] Vulkan: Update texture data during runtime
 
 ## Requirements 
 
