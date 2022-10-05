@@ -21,7 +21,6 @@ const clib = @cImport({
 // - Audit memory allocation overall
 // - Audit logging
 // - wayland: Set mouse icon
-// - wayland: Input (mouse & keyboard)
 // - vulkan: Destroy all vulkan objects
 // - vulkan: Audit staging_buffer code
 // - vulkan: Use a separate memory type for texture data
@@ -1783,6 +1782,10 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             mouse_coordinates.x = motion.surface_x.toDouble();
             mouse_coordinates.y = motion.surface_y.toDouble();
 
+            if(@floatToInt(u16, mouse_coordinates.y) > screen_dimensions.height or @floatToInt(u16, mouse_coordinates.x) > screen_dimensions.width) {
+                return;
+            }
+
             const end_x = exit_button_extent.x + exit_button_extent.width;
             const end_y = exit_button_extent.y + exit_button_extent.height;
             const mouse_x = @floatToInt(u16, mouse_coordinates.x);
@@ -1808,7 +1811,64 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             }
         },
         .button => |button| {
+
+            if(!is_mouse_in_screen) {
+                return;
+            }
+
             const mouse_button = @intToEnum(MouseButton, button.button);
+            {
+                const mouse_x = @floatToInt(u16, mouse_coordinates.x);
+                const mouse_y = @floatToInt(u16, mouse_coordinates.y);
+                std.log.info("Mouse coords: {d}, {d}. Screen {d}, {d}", .{mouse_x, mouse_y, screen_dimensions.width, screen_dimensions.height});
+                if(mouse_x < 3 and mouse_y < 3) {
+                    client.xdg_toplevel.resize(client.seat, button.serial, .bottom_left);
+                }
+
+                const edge_threshold = 3;
+                const max_width = screen_dimensions.width - edge_threshold;
+                const max_height = screen_dimensions.height - edge_threshold;
+
+                if(mouse_x < edge_threshold and mouse_y > max_height) {
+                    client.xdg_toplevel.resize(client.seat, button.serial, .top_left);
+                    return;
+                }
+
+                if(mouse_x > max_width and mouse_y < edge_threshold) {
+                    client.xdg_toplevel.resize(client.seat, button.serial, .bottom_right);
+                    return;
+                }
+
+                if(mouse_x > max_width and mouse_y > max_height) {
+                    client.xdg_toplevel.resize(client.seat, button.serial, .bottom_right);
+                    return;
+                }
+
+                if(mouse_x < edge_threshold) {
+                    client.xdg_toplevel.resize(client.seat, button.serial, .left);
+                    return;
+                }
+
+                if(mouse_x > max_width) {
+                    client.xdg_toplevel.resize(client.seat, button.serial, .right);
+                    return;
+                }
+
+                if(mouse_y <= edge_threshold) {
+                    client.xdg_toplevel.resize(client.seat, button.serial, .top);
+                    return;
+                }
+
+                if(mouse_y == max_height) {
+                    client.xdg_toplevel.resize(client.seat, button.serial, .bottom);
+                    return;
+                }
+            }
+
+            if(@floatToInt(u16, mouse_coordinates.y) > screen_dimensions.height or @floatToInt(u16, mouse_coordinates.x) > screen_dimensions.width) {
+                return;
+            }
+
             if(draw_window_decorations_requested and mouse_button == .left) {
                 // Start interactive window move if mouse coordinates are in window decorations bounds
                 if(@floatToInt(u32, mouse_coordinates.y) <= window_decorations.height_pixels) {
