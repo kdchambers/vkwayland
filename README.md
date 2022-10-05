@@ -48,6 +48,8 @@ Furthermore, questions and discussions are in scope for the project. Feel free t
     cd vkwayland
     zig build run -Drelease-safe
 
+**NOTE**: If you run the application in debug mode, you will get an error if vulkan validation layers aren't installed on your system.
+
 ## Credits
 
 This application makes use of the following libraries and credits go to the authers and contributors for allowing this project to rely soley on zig code.
