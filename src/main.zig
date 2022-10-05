@@ -1707,6 +1707,27 @@ const WaylandClient = struct {
     frame_callback: *wl.Callback,
     xdg_toplevel: *xdg.Toplevel,
     xdg_surface: *xdg.Surface,
+
+    cursor_theme: *wl.CursorTheme,
+    cursor: *wl.Cursor,
+    xcursor: [:0]const u8,
+    cursor_shared_memory: *wl.Shm,
+};
+
+const XCursor = struct {
+    const hidden = "hidden";
+    const left_ptr = "left_ptr";
+    const text = "text";
+    const xterm = "xterm";
+    const hand2 = "hand2";
+    const top_left_corner = "top_left_corner";
+    const top_right_corner = "top_right_corner";
+    const bottom_left_corner = "bottom_left_corner";
+    const bottom_right_corner = "bottom_right_corner";
+    const left_side = "left_side";
+    const right_side = "right_side";
+    const top_side = "top_side";
+    const bottom_side = "bottom_side";
 };
 
 /// Wayland uses linux' input-event-codes for keys and buttons. When a mouse button is
@@ -1763,6 +1784,16 @@ fn frameListener(callback: *wl.Callback, event: wl.Callback.Event, client: *Wayl
                 return;
             };
             client.frame_callback.setListener(*WaylandClient, frameListener, client);
+        },
+    }
+}
+
+fn shmListener(shm: *wl.Shm, event: wl.Shm.Event, client: *WaylandClient) void {
+    _ = client;
+    _ = shm;
+    switch(event) {
+        .format => |format| {
+            std.log.info("Shm foramt: {}", .{format});
         },
     }
 }
@@ -1910,13 +1941,15 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, client: *W
         .global => |global| {
             std.log.info("Wayland: {s}", .{global.interface});
             if (std.cstr.cmp(global.interface, wl.Compositor.getInterface().name) == 0) {
-                client.compositor = registry.bind(global.name, wl.Compositor, 1) catch return;
+                client.compositor = registry.bind(global.name, wl.Compositor, 4) catch return;
             } else if (std.cstr.cmp(global.interface, xdg.WmBase.getInterface().name) == 0) {
-                client.xdg_wm_base = registry.bind(global.name, xdg.WmBase, 1) catch return;
+                client.xdg_wm_base = registry.bind(global.name, xdg.WmBase, 3) catch return;
             } else if (std.cstr.cmp(global.interface, wl.Seat.getInterface().name) == 0) {
-                client.seat = registry.bind(global.name, wl.Seat, 7) catch return;
+                client.seat = registry.bind(global.name, wl.Seat, 5) catch return;
                 client.pointer = client.seat.getPointer() catch return;
                 client.pointer.setListener(*WaylandClient, pointerListener, &wayland_client);
+            } else if (std.cstr.cmp(global.interface, wl.Shm.getInterface().name) == 0) {
+                client.cursor_shared_memory = registry.bind(global.name, wl.Shm, 1) catch return;
             } else if (std.cstr.cmp(global.interface, zxdg.DecorationManagerV1.getInterface().name) == 0) {
                 //
                 // TODO: Negociate with compositor how the window decorations will be drawn
@@ -1950,10 +1983,22 @@ fn waylandSetup() !void {
     wayland_client.frame_callback = try wayland_client.surface.frame();
     wayland_client.frame_callback.setListener(*WaylandClient, frameListener, &wayland_client);
 
+    wayland_client.cursor_shared_memory.setListener(*WaylandClient, shmListener, &wayland_client);
+
     wayland_client.xdg_toplevel.setTitle(application_name);
     wayland_client.surface.commit();
 
     if (wayland_client.display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
+
+
+    //
+    // Load cursor theme
+    //
+
+    const cursor_size = 24;
+    wayland_client.cursor_theme = try wl.CursorTheme.load(null, cursor_size, wayland_client.cursor_shared_memory);
+    wayland_client.cursor = wayland_client.cursor_theme.getCursor(XCursor.left_ptr).?;
+    wayland_client.xcursor = XCursor.left_ptr;
 }
 
 //
