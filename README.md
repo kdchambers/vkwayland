@@ -2,7 +2,7 @@
 
 *A reference application for vulkan and wayland.*
 
-![Screenshot](assets/screenshot.png)
+![Screenshot](assets/screenshot_fedora_gnome.png)
 
 ### Goals
 
@@ -39,7 +39,7 @@ Furthermore, questions and discussions are in scope for the project. Feel free t
 
 ## Requirements 
 
-- Master build of [zig](https://github.com/ziglang/zig).
+- Master build of [zig](https://github.com/ziglang/zig) (Tested with 0.10.0-dev.4247+3234e8de3)
 - Wayland system (mutter, river, sway, etc)
 
 ## Running 
