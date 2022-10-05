@@ -20,7 +20,6 @@ const clib = @cImport({
 // TODO:
 // - Audit memory allocation overall
 // - Audit logging
-// - wayland: Set mouse icon
 // - vulkan: Destroy all vulkan objects
 // - vulkan: Audit staging_buffer code
 // - vulkan: Use a separate memory type for texture data

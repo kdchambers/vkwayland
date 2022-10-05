@@ -30,8 +30,6 @@ pub fn build(b: *Builder) void {
     exe.setTarget(target);
     exe.setBuildMode(mode);
 
-    exe.addIncludeDir("deps/wayland/");
-
     const gen = vkgen.VkGenerateStep.init(b, "deps/vk.xml", "vk.zig");
     const vulkan_pkg = gen.package;
 
