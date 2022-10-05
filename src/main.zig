@@ -1364,9 +1364,10 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         _ = app.device_dispatch.cmdCopyBufferToImage(command_buffer, staging_buffer, texture_image, .transfer_dst_optimal, 2, &regions);
     } else {
         std.debug.assert(texture_layer_size <= texture_memory_requirements.size);
+        std.debug.assert(texture_memory_requirements.alignment >= 16);
         {
             var mapped_memory_ptr = (try app.device_dispatch.mapMemory(app.logical_device, image_memory, 0, texture_layer_size, .{})).?;
-            texture_memory_map = @ptrCast([*]graphics.RGBA(f32), @alignCast(4, mapped_memory_ptr));
+            texture_memory_map = @ptrCast([*]graphics.RGBA(f32), @alignCast(16, mapped_memory_ptr));
         }
 
         // TODO: This could be done on another thread
@@ -1615,8 +1616,10 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     mapped_device_memory = @ptrCast([*]u8, (try app.device_dispatch.mapMemory(app.logical_device, mesh_memory, 0, memory_size, .{})).?);
 
     {
-        const vertices_addr = @ptrCast([*]align(@alignOf(graphics.GenericVertex)) u8, &mapped_device_memory[vertices_range_index_begin]);
-        background_quad = @ptrCast(*graphics.QuadFace(graphics.GenericVertex), &vertices_addr[0]);
+        // TODO: Cleanup alignCasts
+        const required_alignment = @alignOf(graphics.GenericVertex);
+        const vertices_addr = @ptrCast([*]align(required_alignment) u8, @alignCast(required_alignment, &mapped_device_memory[vertices_range_index_begin]));
+        background_quad = @ptrCast(*graphics.QuadFace(graphics.GenericVertex), @alignCast(required_alignment, &vertices_addr[0]));
         background_quad.* = graphics.generateQuadColored(graphics.GenericVertex, full_screen_extent, background_color_b[0].toRGBA(), .top_left);
         const vertices_quad_size: u32 = vertices_range_size / @sizeOf(graphics.GenericVertex);
         quad_face_writer_pool = QuadFaceWriterPool(graphics.GenericVertex).initialize(vertices_addr, vertices_quad_size);
@@ -2766,7 +2769,7 @@ fn createFramebuffers(allocator: std.mem.Allocator, app: GraphicsContext) ![]vk.
 fn createFragmentShaderModule(app: GraphicsContext) !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shaders.fragment_spv.len,
-        .p_code = @ptrCast([*]const u32, shaders.fragment_spv),
+        .p_code = @ptrCast([*]const u32, @alignCast(4, shaders.fragment_spv)),
         .flags = .{},
     };
     return try app.device_dispatch.createShaderModule(app.logical_device, &create_info, null);
@@ -2775,7 +2778,7 @@ fn createFragmentShaderModule(app: GraphicsContext) !vk.ShaderModule {
 fn createVertexShaderModule(app: GraphicsContext) !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shaders.vertex_spv.len,
-        .p_code = @ptrCast([*]const u32, shaders.vertex_spv),
+        .p_code = @ptrCast([*]const u32, @alignCast(4, shaders.vertex_spv)),
         .flags = .{},
     };
     return try app.device_dispatch.createShaderModule(app.logical_device, &create_info, null);
