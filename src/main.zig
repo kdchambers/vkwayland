@@ -1968,7 +1968,6 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, client: *W
                 // TODO: Negociate with compositor how the window decorations will be drawn
                 //
                 draw_window_decorations_requested = false;
-                std.debug.assert(false);
             }
         },
         .global_remove => {},

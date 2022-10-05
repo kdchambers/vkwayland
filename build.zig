@@ -18,7 +18,7 @@ pub fn build(b: *Builder) void {
     scanner.addSystemProtocol("stable/xdg-shell/xdg-shell.xml");
     scanner.addSystemProtocol("unstable/xdg-decoration/xdg-decoration-unstable-v1.xml");
 
-    scanner.generate("xdg_wm_base", 3);
+    scanner.generate("xdg_wm_base", 2);
     scanner.generate("wl_compositor", 4);
     scanner.generate("wl_seat", 5);
     scanner.generate("wl_shm", 1);
