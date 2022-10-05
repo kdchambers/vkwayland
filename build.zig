@@ -15,8 +15,8 @@ pub fn build(b: *Builder) void {
     const mode = b.standardReleaseOptions();
 
     const scanner = ScanProtocolsStep.create(b);
-    scanner.addSystemProtocol("stable/xdg-shell/xdg-shell.xml");
-    scanner.addSystemProtocol("unstable/xdg-decoration/xdg-decoration-unstable-v1.xml");
+    scanner.addProtocolPath("deps/wayland-protocols/stable/xdg-shell/xdg-shell.xml");
+    scanner.addProtocolPath("deps/wayland-protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml");
 
     scanner.generate("xdg_wm_base", 2);
     scanner.generate("wl_compositor", 4);
