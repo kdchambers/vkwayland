@@ -1710,6 +1710,7 @@ const WaylandClient = struct {
 
     cursor_theme: *wl.CursorTheme,
     cursor: *wl.Cursor,
+    cursor_surface: *wl.Surface,
     xcursor: [:0]const u8,
     cursor_shared_memory: *wl.Shm,
 };
@@ -1804,6 +1805,16 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             is_mouse_in_screen = true;
             mouse_coordinates.x = enter.surface_x.toDouble();
             mouse_coordinates.y = enter.surface_y.toDouble();
+
+            //
+            // When mouse enters application surface, update the cursor image
+            //
+            const image = client.cursor.images[0];
+            const image_buffer = image.getBuffer() catch return;
+            client.cursor_surface.attach(image_buffer, 0, 0);
+            client.pointer.setCursor(enter.serial, client.cursor_surface, @intCast(i32, image.hotspot_x), @intCast(i32, image.hotspot_y));
+            client.cursor_surface.damageBuffer(0, 0, std.math.maxInt(i32), std.math.maxInt(i32));
+            client.cursor_surface.commit();
         },
         .leave => |leave| {
             _ = leave;
@@ -1994,6 +2005,8 @@ fn waylandSetup() !void {
     //
     // Load cursor theme
     //
+
+    wayland_client.cursor_surface = try wayland_client.compositor.createSurface();
 
     const cursor_size = 24;
     wayland_client.cursor_theme = try wl.CursorTheme.load(null, cursor_size, wayland_client.cursor_shared_memory);
