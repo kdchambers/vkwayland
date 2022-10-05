@@ -21,6 +21,7 @@ pub fn build(b: *Builder) void {
     scanner.generate("xdg_wm_base", 3);
     scanner.generate("wl_compositor", 4);
     scanner.generate("wl_seat", 5);
+    scanner.generate("wl_shm", 1);
 
     scanner.generate("zxdg_decoration_manager_v1", 1);
 
@@ -49,6 +50,7 @@ pub fn build(b: *Builder) void {
 
     exe.linkLibC();
     exe.linkSystemLibrary("wayland-client");
+    exe.linkSystemLibrary("wayland-cursor");
 
     // NOTE: Taken from https://github.com/ifreund/hello-zig-wayland/blob/master/build.zig
     // TODO: remove when https://github.com/ziglang/zig/issues/131 is implemented
