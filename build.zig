@@ -30,8 +30,8 @@ pub fn build(b: *Builder) void {
     exe.setTarget(target);
     exe.setBuildMode(mode);
 
-    const gen = vkgen.VkGenerateStep.init(b, "deps/vk.xml", "vk.zig");
-    const vulkan_pkg = gen.package;
+    const gen = vkgen.VkGenerateStep.create(b, "deps/vk.xml", "vk.zig");
+    const vulkan_pkg = gen.getPackage("vulkan");
 
     exe.addPackage(.{
         .name = "shaders",

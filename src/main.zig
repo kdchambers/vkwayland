@@ -442,7 +442,7 @@ const graphics = struct {
     fn TypeOfField(comptime t: anytype, comptime field_name: []const u8) type {
         for (@typeInfo(t).Struct.fields) |field| {
             if (std.mem.eql(u8, field.name, field_name)) {
-                return field.field_type;
+                return field.type;
             }
         }
         unreachable;
