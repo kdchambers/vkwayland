@@ -12,7 +12,7 @@ const ScanProtocolsStep = @import("deps/zig-wayland/build.zig").ScanProtocolsSte
 
 pub fn build(b: *Builder) void {
     const target = b.standardTargetOptions(.{});
-    const mode = b.standardReleaseOptions();
+    const optimize = b.standardOptimizeOption(.{});
 
     const scanner = ScanProtocolsStep.create(b);
     scanner.addProtocolPath("deps/wayland-protocols/stable/xdg-shell/xdg-shell.xml");
@@ -25,26 +25,35 @@ pub fn build(b: *Builder) void {
 
     scanner.generate("zxdg_decoration_manager_v1", 1);
 
-    const exe = b.addExecutable("vkwayland", "src/main.zig");
-
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
-
-    const gen = vkgen.VkGenerateStep.create(b, "deps/vk.xml", "vk.zig");
-    const vulkan_pkg = gen.getPackage("vulkan");
-
-    exe.addPackage(.{
-        .name = "shaders",
-        .source = .{ .path = "shaders/shaders.zig" },
+    const exe = b.addExecutable(.{
+        .name = "vkwayland",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
     });
 
-    exe.addPackage(.{
-        .name = "wayland",
-        .source = .{ .generated = &scanner.result },
+    const gen = vkgen.VkGenerateStep.create(b, "deps/vk.xml");
+    exe.addModule("vulkan", gen.getModule());
+
+    const shaders_module = b.createModule(.{
+        .source_file = .{ .path = "shaders/shaders.zig" },
+        .dependencies = &.{},
     });
+    exe.addModule("shaders", shaders_module);
+
+    const wayland_module = b.createModule(.{
+        .source_file = .{ .generated = &scanner.result },
+        .dependencies = &.{},
+    });
+    exe.addModule("wayland", wayland_module);
+
     exe.step.dependOn(&scanner.step);
 
-    exe.addPackagePath("zigimg", "deps/zigimg/zigimg.zig");
+    const zigimg_module = b.createModule(.{
+        .source_file = .{ .path = "deps/zigimg/zigimg.zig" },
+        .dependencies = &.{},
+    });
+    exe.addModule("zigimg", zigimg_module);
 
     exe.linkLibC();
     exe.linkSystemLibrary("wayland-client");
@@ -53,8 +62,6 @@ pub fn build(b: *Builder) void {
     // NOTE: Taken from https://github.com/ifreund/hello-zig-wayland/blob/master/build.zig
     // TODO: remove when https://github.com/ziglang/zig/issues/131 is implemented
     scanner.addCSource(exe);
-
-    exe.addPackage(vulkan_pkg);
 
     exe.install();
 

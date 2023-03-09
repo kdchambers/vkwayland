@@ -1018,7 +1018,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         };
         defer allocator.free(physical_devices);
 
-        for (physical_devices) |physical_device, physical_device_i| {
+        for (physical_devices, 0..) |physical_device, physical_device_i| {
 
             std.log.info("Physical vulkan devices found: {d}", .{physical_devices.len});
 
@@ -1073,7 +1073,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             std.debug.print("** Queue Families found on device **\n\n", .{});
             printVulkanQueueFamilies(queue_families[0..queue_family_count], 0);
 
-            for(queue_families[0..queue_family_count]) |queue_family, queue_family_i| {
+            for(queue_families[0..queue_family_count], 0..) |queue_family, queue_family_i| {
                 if (queue_family.queue_count <= 0) {
                     continue;
                 }
@@ -1371,7 +1371,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         }
 
         // TODO: This could be done on another thread
-        for(icon_path_list) |icon_path, icon_path_i| {
+        for(icon_path_list, 0..) |icon_path, icon_path_i| {
             // TODO: Create an  arena / allocator of a fixed size that can be reused here.
             var icon_image = try img.Image.fromFilePath(allocator, icon_path);
             defer icon_image.deinit();
@@ -2144,7 +2144,7 @@ fn recordRenderPass(
         },
     };
 
-    for (app.command_buffers) |command_buffer, i| {
+    for (app.command_buffers, 0..) |command_buffer, i| {
         try app.device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
             .flags = .{},
             .p_inheritance_info = null,
@@ -2326,7 +2326,7 @@ fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 }
 
 fn createSwapchainImageViews(app: GraphicsContext) !void {
-    for (app.swapchain_image_views) |*image_view, image_view_i| {
+    for (app.swapchain_image_views, 0..) |*image_view, image_view_i| {
         const image_view_create_info = vk.ImageViewCreateInfo{
             .image = app.swapchain_images[image_view_i],
             .view_type = .@"2d",
@@ -2864,7 +2864,7 @@ fn printVulkanMemoryHeaps(memory_properties: vk.PhysicalDeviceMemoryProperties, 
 fn printVulkanQueueFamilies(queue_families: []vk.QueueFamilyProperties, comptime indent_level: u32) void {
     const print = std.debug.print;
     const base_indent = "  " ** indent_level;
-    for(queue_families) |queue_family, queue_family_i| {
+    for(queue_families, 0..) |queue_family, queue_family_i| {
         print(base_indent ++ "Queue family index #{d}\n", .{queue_family_i});
         printVulkanQueueFamily(queue_family, indent_level + 1);
     }
