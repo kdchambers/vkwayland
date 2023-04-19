@@ -63,9 +63,9 @@ pub fn build(b: *Builder) void {
     // TODO: remove when https://github.com/ziglang/zig/issues/131 is implemented
     scanner.addCSource(exe);
 
-    exe.install();
+    b.installArtifact(exe);
 
-    const run_cmd = exe.run();
+    const run_cmd = b.addRunArtifact(exe);
     if (b.args) |args| run_cmd.addArgs(args);
     run_cmd.step.dependOn(b.getInstallStep());
 
