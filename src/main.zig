@@ -1102,7 +1102,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     {
         const device_create_info = vk.DeviceCreateInfo{
             .queue_create_info_count = 1,
-            .p_queue_create_infos = @ptrCast([*]vk.DeviceQueueCreateInfo, &vk.DeviceQueueCreateInfo{
+            .p_queue_create_infos = @ptrCast([*]const vk.DeviceQueueCreateInfo, &vk.DeviceQueueCreateInfo{
                 .queue_family_index = app.graphics_present_queue_index,
                 .queue_count = 1,
                 .p_queue_priorities = &[1]f32{1.0},

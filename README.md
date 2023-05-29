@@ -31,7 +31,7 @@ Additionally, feature requests, questions and discussions are in scope for the p
 
 ## Requirements 
 
-- Master build of [zig](https://github.com/ziglang/zig) (Tested with 0.11.0-dev.2935)
+- Master build of [zig](https://github.com/ziglang/zig) (Tested with 0.11.0-dev.3132)
 - Wayland system (mutter, river, sway, etc)
 - libwayland-client (Removal of dependency is a TODO)
 - libwayland-cursor (Removal of dependency is a TODO)
