@@ -207,14 +207,14 @@ const icon_path_list = [_][]const u8{
 
 /// Returns the normalized coordinates of the icon in the texture image
 fn iconTextureLookup(icon_type: IconType) geometry.Coordinates2D(f32) {
-    const icon_type_index = @enumToInt(icon_type);
+    const icon_type_index = @intFromEnum(icon_type);
     const x: u32 = icon_type_index % icon_texture_row_count;
     const y: u32 = icon_type_index / icon_texture_row_count;
     const x_pixel = x * icon_dimensions.width;
     const y_pixel = y * icon_dimensions.height;
     return .{
-        .x = @intToFloat(f32, x_pixel) / @intToFloat(f32, texture_layer_dimensions.width),
-        .y = @intToFloat(f32, y_pixel) / @intToFloat(f32, texture_layer_dimensions.height),
+        .x = @as(f32, @floatFromInt(x_pixel)) / @as(f32, @floatFromInt(texture_layer_dimensions.width)),
+        .y = @as(f32, @floatFromInt(y_pixel)) / @as(f32, @floatFromInt(texture_layer_dimensions.height)),
     };
 }
 
@@ -238,7 +238,7 @@ const texture_layer_dimensions = geometry.Dimensions2D(TexturePixelBaseType){
 };
 
 /// Size in bytes of each texture layer (Not including padding, etc)
-const texture_layer_size = @sizeOf(graphics.RGBA(f32)) * @intCast(u64, texture_layer_dimensions.width) * texture_layer_dimensions.height;
+const texture_layer_size = @sizeOf(graphics.RGBA(f32)) * @as(u64, @intCast(texture_layer_dimensions.width)) * texture_layer_dimensions.height;
 
 const indices_range_index_begin = 0;
 const indices_range_size = max_texture_quads_per_render * @sizeOf(u16) * 6; // 12 kb
@@ -380,7 +380,7 @@ fn QuadFaceWriterPool(comptime VertexType: type) type {
 
         pub fn initialize(start: [*]align(@alignOf(VertexType)) u8, memory_quad_range: u32) @This() {
             return .{
-                .memory_ptr = @ptrCast([*]QuadFace(VertexType), start),
+                .memory_ptr = @as([*]QuadFace(VertexType), @ptrCast(start)),
                 .memory_quad_range = memory_quad_range,
             };
         }
@@ -404,7 +404,7 @@ fn QuadFaceWriter(comptime VertexType: type) type {
 
         pub fn initialize(base: [*]QuadFace(VertexType), quad_index: u32, quad_size: u32) @This() {
             return .{
-                .memory_ptr = @ptrCast([*]QuadFace(VertexType), &base[quad_index]),
+                .memory_ptr = @as([*]QuadFace(VertexType), @ptrCast(&base[quad_index])),
                 .quad_index = quad_index,
                 .capacity = quad_size,
                 .used = 0,
@@ -417,7 +417,7 @@ fn QuadFaceWriter(comptime VertexType: type) type {
 
         pub fn remaining(self: *@This()) u32 {
             std.debug.assert(self.capacity >= self.used);
-            return @intCast(u32, self.capacity - self.used);
+            return @as(u32, @intCast(self.capacity - self.used));
         }
 
         pub fn reset(self: *@This()) void {
@@ -550,9 +550,9 @@ const graphics = struct {
         return packed struct {
             pub fn fromInt(r: u8, g: u8, b: u8) @This() {
                 return .{
-                    .r = @intToFloat(BaseType, r) / 255.0,
-                    .g = @intToFloat(BaseType, g) / 255.0,
-                    .b = @intToFloat(BaseType, b) / 255.0,
+                    .r = @as(BaseType, @floatFromInt(r)) / 255.0,
+                    .g = @as(BaseType, @floatFromInt(g)) / 255.0,
+                    .b = @as(BaseType, @floatFromInt(b)) / 255.0,
                 };
             }
 
@@ -575,10 +575,10 @@ const graphics = struct {
         return packed struct {
             pub fn fromInt(comptime IntType: type, r: IntType, g: IntType, b: IntType, a: IntType) @This() {
                 return .{
-                    .r = @intToFloat(BaseType, r) / 255.0,
-                    .g = @intToFloat(BaseType, g) / 255.0,
-                    .b = @intToFloat(BaseType, b) / 255.0,
-                    .a = @intToFloat(BaseType, a) / 255.0,
+                    .r = @as(BaseType, @floatFromInt(r)) / 255.0,
+                    .g = @as(BaseType, @floatFromInt(g)) / 255.0,
+                    .b = @as(BaseType, @floatFromInt(b)) / 255.0,
+                    .a = @as(BaseType, @floatFromInt(a)) / 255.0,
                 };
             }
 
@@ -713,8 +713,8 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             const current_time = std.time.milliTimestamp();
             std.debug.assert(current_time >= background_color_loop_time_base);
 
-            const loop_ms = @intToFloat(f64, background_color_loop_ms);
-            var color_transition: f32 = @floatCast(f32, @rem(@intToFloat(f64, current_time - background_color_loop_time_base), loop_ms) / loop_ms);
+            const loop_ms: f64 = @floatFromInt(background_color_loop_ms);
+            var color_transition: f32 = @floatCast(@rem(@as(f64, @floatFromInt(current_time - background_color_loop_time_base)), loop_ms) / loop_ms);
             if(color_transition > 0.5) {
                 color_transition = 1.0 - color_transition;
             }
@@ -759,7 +759,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         const frame_end_ns = std.time.nanoTimestamp();
         std.debug.assert(frame_end_ns >= frame_start_ns);
 
-        const frame_duration_ns = @intCast(u64, frame_end_ns - frame_start_ns);
+        const frame_duration_ns: u64 = @intCast(frame_end_ns - frame_start_ns);
 
         if (frame_duration_ns > slowest_frame_ns) {
             slowest_frame_ns = frame_duration_ns;
@@ -770,16 +770,16 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         }
 
         std.debug.assert(target_ns_per_frame > frame_duration_ns);
-        const remaining_ns: u64 = target_ns_per_frame - @intCast(u64, frame_duration_ns);
+        const remaining_ns: u64 = target_ns_per_frame - @as(u64, @intCast(frame_duration_ns));
         std.debug.assert(remaining_ns <= target_ns_per_frame);
 
         const frame_work_completed_ns = std.time.nanoTimestamp();
-        frame_duration_awake_ns += @intCast(u64, frame_work_completed_ns - frame_start_ns);
+        frame_duration_awake_ns += @as(u64, @intCast(frame_work_completed_ns - frame_start_ns));
 
         std.time.sleep(remaining_ns);
 
         const frame_completion_ns = std.time.nanoTimestamp();
-        frame_duration_total_ns += @intCast(u64, frame_completion_ns - frame_start_ns);
+        frame_duration_total_ns += @as(u64, @intCast(frame_completion_ns - frame_start_ns));
     }
 
     std.log.info("Run time: {d}", .{std.fmt.fmtDuration(frame_duration_total_ns)});
@@ -846,16 +846,16 @@ fn draw() !void {
     const x_begin_pixels = outer_margin_pixels + (horizonal_quad_space_pixels / 2);
     const y_begin_pixels = y_offset_window_decorations + outer_margin_pixels + (vertical_quad_space_pixels / 2);
 
-    const x_begin = -1.0 + (@intToFloat(f32, x_begin_pixels * 2) / @intToFloat(f32, screen_dimensions.width));
-    const y_begin = -1.0 + (@intToFloat(f32, y_begin_pixels * 2) / @intToFloat(f32, screen_dimensions.height));
+    const x_begin = -1.0 + (@as(f32, @floatFromInt(x_begin_pixels * 2)) / @as(f32, @floatFromInt(screen_dimensions.width)));
+    const y_begin = -1.0 + (@as(f32, @floatFromInt(y_begin_pixels * 2)) / @as(f32, @floatFromInt(screen_dimensions.height)));
 
-    const stride_horizonal = @intToFloat(f32, (dimensions_pixels.width + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.width);
-    const stride_vertical = @intToFloat(f32, (dimensions_pixels.height + inner_margin_pixels) * 2) / @intToFloat(f32, screen_dimensions.height);
+    const stride_horizonal = @as(f32, @floatFromInt((dimensions_pixels.width + inner_margin_pixels) * 2)) / @as(f32, @floatFromInt(screen_dimensions.width));
+    const stride_vertical = @as(f32, @floatFromInt((dimensions_pixels.height + inner_margin_pixels) * 2)) / @as(f32, @floatFromInt(screen_dimensions.height));
 
     var face_writer = quad_face_writer_pool.create(1, (vertices_range_size - 1) / @sizeOf(graphics.GenericVertex));
     if(draw_window_decorations_requested) {
         var faces = try face_writer.allocate(3);
-        const window_decoration_height = @intToFloat(f32, window_decorations.height_pixels * 2) / @intToFloat(f32, screen_dimensions.height);
+        const window_decoration_height = @as(f32, @floatFromInt(window_decorations.height_pixels * 2)) / @as(f32, @floatFromInt(screen_dimensions.height));
         {
             //
             // Draw window decoration topbar background
@@ -874,18 +874,18 @@ fn draw() !void {
             //
             std.debug.assert(window_decorations.exit_button.size_pixels <= window_decorations.height_pixels);
             const screen_icon_dimensions = geometry.Dimensions2D(f32) {
-                .width = @intToFloat(f32, window_decorations.exit_button.size_pixels * 2) / @intToFloat(f32, screen_dimensions.width),
-                .height = @intToFloat(f32, window_decorations.exit_button.size_pixels * 2) / @intToFloat(f32, screen_dimensions.height),
+                .width = @as(f32, @floatFromInt(window_decorations.exit_button.size_pixels * 2)) / @as(f32, @floatFromInt(screen_dimensions.width)),
+                .height = @as(f32, @floatFromInt(window_decorations.exit_button.size_pixels * 2)) / @as(f32, @floatFromInt(screen_dimensions.height)),
             };
-            const exit_button_outer_margin_pixels = @intToFloat(f32, window_decorations.height_pixels - window_decorations.exit_button.size_pixels) / 2.0;
-            const outer_margin_hor = exit_button_outer_margin_pixels * 2.0 / @intToFloat(f32, screen_dimensions.width);
-            const outer_margin_ver = exit_button_outer_margin_pixels * 2.0 / @intToFloat(f32, screen_dimensions.height);
+            const exit_button_outer_margin_pixels = @as(f32, @floatFromInt(window_decorations.height_pixels - window_decorations.exit_button.size_pixels)) / 2.0;
+            const outer_margin_hor = exit_button_outer_margin_pixels * 2.0 / @as(f32, @floatFromInt(screen_dimensions.width));
+            const outer_margin_ver = exit_button_outer_margin_pixels * 2.0 / @as(f32, @floatFromInt(screen_dimensions.height));
             const texture_coordinates = iconTextureLookup(.close);
             const texture_extent = geometry.Extent2D(f32) {
                 .x = texture_coordinates.x,
                 .y = texture_coordinates.y,
-                .width = @intToFloat(f32, icon_dimensions.width) / @intToFloat(f32, texture_layer_dimensions.width),
-                .height = @intToFloat(f32, icon_dimensions.height) / @intToFloat(f32, texture_layer_dimensions.height),
+                .width = @as(f32, @floatFromInt(icon_dimensions.width)) / @as(f32, @floatFromInt(texture_layer_dimensions.width)),
+                .height = @as(f32, @floatFromInt(icon_dimensions.height)) / @as(f32, @floatFromInt(texture_layer_dimensions.height)),
             };
             const extent = geometry.Extent2D(f32) {
                 .x = 1.0 - (outer_margin_hor + screen_icon_dimensions.width),
@@ -913,18 +913,18 @@ fn draw() !void {
         var vertical_i: u32 = 0;
         while(vertical_i < vertical_count) : (vertical_i += 1) {
             const extent = geometry.Extent2D(f32) {
-                .x = x_begin + (stride_horizonal * @intToFloat(f32, horizonal_i)),
-                .y = y_begin + (stride_vertical * @intToFloat(f32, vertical_i)),
-                .width = (@intToFloat(f32, dimensions_pixels.width) / @intToFloat(f32, screen_dimensions.width)) * 2.0,
-                .height = (@intToFloat(f32, dimensions_pixels.height) / @intToFloat(f32, screen_dimensions.height)) * 2.0,
+                .x = x_begin + (stride_horizonal * @as(f32, @floatFromInt(horizonal_i))),
+                .y = y_begin + (stride_vertical * @as(f32, @floatFromInt(vertical_i))),
+                .width = @as(f32, @floatFromInt(dimensions_pixels.width)) / @as(f32, @floatFromInt(screen_dimensions.width)) * 2.0,
+                .height = @as(f32, @floatFromInt(dimensions_pixels.height)) / @as(f32, @floatFromInt(screen_dimensions.height)) * 2.0,
             };
             const face_index = horizonal_i + (vertical_i * horizonal_count);
-            const texture_coordinates = iconTextureLookup(@intToEnum(IconType, face_index % icon_path_list.len));
+            const texture_coordinates = iconTextureLookup(@enumFromInt(face_index % icon_path_list.len));
             const texture_extent = geometry.Extent2D(f32) {
                 .x = texture_coordinates.x,
                 .y = texture_coordinates.y,
-                .width = @intToFloat(f32, icon_dimensions.width) / @intToFloat(f32, texture_layer_dimensions.width),
-                .height = @intToFloat(f32, icon_dimensions.height) / @intToFloat(f32, texture_layer_dimensions.height),
+                .width = @as(f32, @floatFromInt(icon_dimensions.width)) / @as(f32, @floatFromInt(texture_layer_dimensions.width)),
+                .height = @as(f32, @floatFromInt(icon_dimensions.height)) / @as(f32, @floatFromInt(texture_layer_dimensions.height)),
             };
             faces[face_index] = graphics.generateTexturedQuad(graphics.GenericVertex, extent, texture_extent, .top_left);
         }
@@ -946,7 +946,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     };
 
     if (clib.dlopen(vulkan_lib_symbol, clib.RTLD_NOW)) |vulkan_loader| {
-        const vk_get_instance_proc_addr_fn_opt = @ptrCast(?*const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction, clib.dlsym(vulkan_loader, "vkGetInstanceProcAddr"));
+        const vk_get_instance_proc_addr_fn_opt: ?*const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction = @ptrCast(clib.dlsym(vulkan_loader, "vkGetInstanceProcAddr"));
         if (vk_get_instance_proc_addr_fn_opt) |vk_get_instance_proc_addr_fn| {
             vkGetInstanceProcAddr = vk_get_instance_proc_addr_fn;
             app.base_dispatch = try vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
@@ -970,7 +970,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             .api_version = vulkan_api_version,
         },
         .enabled_extension_count = surface_extensions.len,
-        .pp_enabled_extension_names = @ptrCast([*]const [*:0]const u8, &surface_extensions),
+        .pp_enabled_extension_names = @ptrCast(&surface_extensions),
         .enabled_layer_count = if (enable_validation_layers) validation_layers.len else 0,
         .pp_enabled_layer_names = if (enable_validation_layers) &validation_layers else undefined,
         .flags = .{},
@@ -981,8 +981,8 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     {
         const wayland_surface_create_info = vk.WaylandSurfaceCreateInfoKHR{
-            .display = @ptrCast(*vk.wl_display, wayland_client.display),
-            .surface = @ptrCast(*vk.wl_surface, wayland_client.surface),
+            .display = @ptrCast(wayland_client.display),
+            .surface = @ptrCast(wayland_client.surface),
             .flags = .{},
         };
 
@@ -1042,7 +1042,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                         // NOTE: We are relying on device_extensions to only contain c strings up to 255 charactors
                         //       available_extension.extension_name will always be a null terminated string in a 256 char buffer
                         // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VK_MAX_EXTENSION_NAME_SIZE.html
-                        if(std.cstr.cmp(requested_extension, @ptrCast([*:0]const u8, &available_extension.extension_name)) == 0) {
+                        if(std.mem.orderZ(u8, requested_extension, @as([*:0]const u8, @ptrCast(&available_extension.extension_name))) == .eq) {
                             continue :dev_extensions;
                         }
                     }
@@ -1080,11 +1080,11 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                 if (queue_family.queue_flags.graphics_bit) {
                     const present_support = try app.instance_dispatch.getPhysicalDeviceSurfaceSupportKHR(
                         physical_device, 
-                        @intCast(u32, queue_family_i), 
+                        @intCast(queue_family_i), 
                         app.surface,
                     );
                     if (present_support != 0) {
-                        app.graphics_present_queue_index = @intCast(u32, queue_family_i);
+                        app.graphics_present_queue_index = @intCast(queue_family_i);
                         break :outer physical_device;
                     }
                 }
@@ -1102,7 +1102,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     {
         const device_create_info = vk.DeviceCreateInfo{
             .queue_create_info_count = 1,
-            .p_queue_create_infos = @ptrCast([*]const vk.DeviceQueueCreateInfo, &vk.DeviceQueueCreateInfo{
+            .p_queue_create_infos = @ptrCast(&vk.DeviceQueueCreateInfo{
                 .queue_family_index = app.graphics_present_queue_index,
                 .queue_count = 1,
                 .p_queue_priorities = &[1]f32{1.0},
@@ -1244,7 +1244,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         try app.device_dispatch.allocateCommandBuffers(
             app.logical_device, 
             &comment_buffer_alloc_info, 
-            @ptrCast([*]vk.CommandBuffer, &command_buffer)
+            @ptrCast(&command_buffer)
         );
     }
 
@@ -1283,7 +1283,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         try app.device_dispatch.bindBufferMemory(app.logical_device, staging_buffer, staging_memory, 0);
         {
             var mapped_memory_ptr = (try app.device_dispatch.mapMemory(app.logical_device, staging_memory, 0, staging_memory, .{})).?;
-            texture_memory_map = @ptrCast([*]graphics.RGBA(f32), @alignCast(4, mapped_memory_ptr));
+            texture_memory_map = @ptrCast(@alignCast(mapped_memory_ptr));
         }
 
         // TODO: texture_size_bytes * 2
@@ -1367,7 +1367,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         std.debug.assert(texture_memory_requirements.alignment >= 16);
         {
             var mapped_memory_ptr = (try app.device_dispatch.mapMemory(app.logical_device, image_memory, 0, texture_layer_size, .{})).?;
-            texture_memory_map = @ptrCast([*]graphics.RGBA(f32), @alignCast(16, mapped_memory_ptr));
+            texture_memory_map = @ptrCast(@alignCast(mapped_memory_ptr));
         }
 
         // TODO: This could be done on another thread
@@ -1376,7 +1376,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             var icon_image = try img.Image.fromFilePath(allocator, icon_path);
             defer icon_image.deinit();
 
-            const icon_type = @intToEnum(IconType, icon_path_i);
+            const icon_type: IconType = @enumFromInt(icon_path_i);
 
             if(icon_image.width != icon_image.width or icon_image.height != icon_image.height) {
                 std.log.err("Icon image for icon '{}' has unexpected dimensions."
@@ -1400,8 +1400,8 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
             std.debug.assert(source_pixels.len == icon_image.width * icon_image.height);
 
-            const x = @intCast(u32, icon_path_i) % icon_texture_row_count;
-            const y = @intCast(u32, icon_path_i) / icon_texture_row_count;
+            const x = @as(u32, @intCast(icon_path_i)) % icon_texture_row_count;
+            const y = @as(u32, @intCast(icon_path_i)) / icon_texture_row_count;
             const dst_offset_coords = geometry.Coordinates2D(u32) {
                 .x = x * icon_dimensions.width,
                 .y = y * icon_dimensions.height,
@@ -1416,7 +1416,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                     texture_memory_map[dst_index].r = icon_color.r;
                     texture_memory_map[dst_index].g = icon_color.g;
                     texture_memory_map[dst_index].b = icon_color.b;
-                    texture_memory_map[dst_index].a = @intToFloat(f32, source_pixels[src_index].a) / 255.0;
+                    texture_memory_map[dst_index].a = @as(f32, @floatFromInt(source_pixels[src_index].a)) / 255.0;
                 }
             }
         }
@@ -1424,7 +1424,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         // Not sure if this is a hack, but because we multiply the texture sample by the 
         // color in the fragment shader, we need pixel in the texture that we known will return 1.0
         // Here we're setting the last pixel to 1.0, which corresponds to a texture mapping of 1.0, 1.0
-        const last_index: usize = (@intCast(usize, texture_layer_dimensions.width) * texture_layer_dimensions.height) - 1;
+        const last_index: usize = (@as(usize, @intCast(texture_layer_dimensions.width)) * texture_layer_dimensions.height) - 1;
         texture_memory_map[last_index].r = 1.0;
         texture_memory_map[last_index].g = 1.0;
         texture_memory_map[last_index].b = 1.0;
@@ -1466,7 +1466,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         .p_wait_semaphores = undefined,
         .p_wait_dst_stage_mask = undefined,
         .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]vk.CommandBuffer, &command_buffer),
+        .p_command_buffers = @ptrCast(&command_buffer),
         .signal_semaphore_count = 0,
         .p_signal_semaphores = undefined,
     }};
@@ -1613,13 +1613,13 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         try app.device_dispatch.bindBufferMemory(app.logical_device, texture_indices_buffer, mesh_memory, indices_range_index_begin);
     }
 
-    mapped_device_memory = @ptrCast([*]u8, (try app.device_dispatch.mapMemory(app.logical_device, mesh_memory, 0, memory_size, .{})).?);
+    mapped_device_memory = @ptrCast((try app.device_dispatch.mapMemory(app.logical_device, mesh_memory, 0, memory_size, .{})).?);
 
     {
         // TODO: Cleanup alignCasts
         const required_alignment = @alignOf(graphics.GenericVertex);
-        const vertices_addr = @ptrCast([*]align(required_alignment) u8, @alignCast(required_alignment, &mapped_device_memory[vertices_range_index_begin]));
-        background_quad = @ptrCast(*graphics.QuadFace(graphics.GenericVertex), @alignCast(required_alignment, &vertices_addr[0]));
+        const vertices_addr: [*]align(required_alignment) u8 = @ptrCast(@alignCast(&mapped_device_memory[vertices_range_index_begin]));
+        background_quad = @ptrCast(@alignCast(&vertices_addr[0]));
         background_quad.* = graphics.generateQuadColored(graphics.GenericVertex, full_screen_extent, background_color_b[0].toRGBA(), .top_left);
         const vertices_quad_size: u32 = vertices_range_size / @sizeOf(graphics.GenericVertex);
         quad_face_writer_pool = QuadFaceWriterPool(graphics.GenericVertex).initialize(vertices_addr, vertices_quad_size);
@@ -1627,16 +1627,16 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     {
         // We won't be reusing vertices except in making quads so we can pre-generate the entire indices buffer
-        var indices = @ptrCast([*]u16, @alignCast(16, &mapped_device_memory[indices_range_index_begin]));
+        var indices: [*] align(16)u16  = @ptrCast(@alignCast(&mapped_device_memory[indices_range_index_begin]));
 
         var j: u32 = 0;
         while (j < (indices_range_count / 6)) : (j += 1) {
-            indices[j * 6 + 0] = @intCast(u16, j * 4) + 0; // Top left
-            indices[j * 6 + 1] = @intCast(u16, j * 4) + 1; // Top right
-            indices[j * 6 + 2] = @intCast(u16, j * 4) + 2; // Bottom right
-            indices[j * 6 + 3] = @intCast(u16, j * 4) + 0; // Top left
-            indices[j * 6 + 4] = @intCast(u16, j * 4) + 2; // Bottom right
-            indices[j * 6 + 5] = @intCast(u16, j * 4) + 3; // Bottom left
+            indices[j * 6 + 0] = @as(u16, @intCast(j * 4)) + 0; // Top left
+            indices[j * 6 + 1] = @as(u16, @intCast(j * 4)) + 1; // Top right
+            indices[j * 6 + 2] = @as(u16, @intCast(j * 4)) + 2; // Bottom right
+            indices[j * 6 + 3] = @as(u16, @intCast(j * 4)) + 0; // Top left
+            indices[j * 6 + 4] = @as(u16, @intCast(j * 4)) + 2; // Bottom right
+            indices[j * 6 + 5] = @as(u16, @intCast(j * 4)) + 3; // Bottom left
         }
     }
 
@@ -1679,7 +1679,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         const command_buffer_allocate_info = vk.CommandBufferAllocateInfo{
             .command_pool = app.command_pool,
             .level = .primary,
-            .command_buffer_count = @intCast(u32, app.command_buffers.len),
+            .command_buffer_count = @intCast(app.command_buffers.len),
         };
         try app.device_dispatch.allocateCommandBuffers(app.logical_device, &command_buffer_allocate_info, app.command_buffers.ptr);
     }
@@ -1766,11 +1766,11 @@ fn xdgToplevelListener(_: *xdg.Toplevel, event: xdg.Toplevel.Event, close_reques
         .configure => |configure| {
             if (configure.width > 0 and configure.width != screen_dimensions.width) {
                 framebuffer_resized = true;
-                screen_dimensions.width = @intCast(u16, configure.width);
+                screen_dimensions.width = @intCast(configure.width);
             }
             if (configure.height > 0 and configure.height != screen_dimensions.height) {
                 framebuffer_resized = true;
-                screen_dimensions.height = @intCast(u16, configure.height);
+                screen_dimensions.height = @intCast(configure.height);
             }
         },
         .close => close_requested.* = true,
@@ -1814,7 +1814,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             const image = client.cursor.images[0];
             const image_buffer = image.getBuffer() catch return;
             client.cursor_surface.attach(image_buffer, 0, 0);
-            client.pointer.setCursor(enter.serial, client.cursor_surface, @intCast(i32, image.hotspot_x), @intCast(i32, image.hotspot_y));
+            client.pointer.setCursor(enter.serial, client.cursor_surface, @intCast(image.hotspot_x), @intCast(image.hotspot_y));
             client.cursor_surface.damageBuffer(0, 0, std.math.maxInt(i32), std.math.maxInt(i32));
             client.cursor_surface.commit();
         },
@@ -1826,14 +1826,14 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             mouse_coordinates.x = motion.surface_x.toDouble();
             mouse_coordinates.y = motion.surface_y.toDouble();
 
-            if(@floatToInt(u16, mouse_coordinates.y) > screen_dimensions.height or @floatToInt(u16, mouse_coordinates.x) > screen_dimensions.width) {
+            if(@as(u16, @intFromFloat(mouse_coordinates.y)) > screen_dimensions.height or @as(u16, @intFromFloat(mouse_coordinates.x)) > screen_dimensions.width) {
                 return;
             }
 
             const end_x = exit_button_extent.x + exit_button_extent.width;
             const end_y = exit_button_extent.y + exit_button_extent.height;
-            const mouse_x = @floatToInt(u16, mouse_coordinates.x);
-            const mouse_y = screen_dimensions.height - @floatToInt(u16, mouse_coordinates.y);
+            const mouse_x: u16 = @intFromFloat(mouse_coordinates.x);
+            const mouse_y = screen_dimensions.height - @as(u16, @intFromFloat(mouse_coordinates.y));
             const is_within_bounds = (mouse_x >= exit_button_extent.x and mouse_y >= exit_button_extent.y and mouse_x <= end_x and mouse_y <= end_y);
 
             if(is_within_bounds and !exit_button_hovered) {
@@ -1860,10 +1860,10 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
                 return;
             }
 
-            const mouse_button = @intToEnum(MouseButton, button.button);
+            const mouse_button: MouseButton = @enumFromInt(button.button);
             {
-                const mouse_x = @floatToInt(u16, mouse_coordinates.x);
-                const mouse_y = @floatToInt(u16, mouse_coordinates.y);
+                const mouse_x: u16 = @intFromFloat(mouse_coordinates.x);
+                const mouse_y: u16 = @intFromFloat(mouse_coordinates.y);
                 std.log.info("Mouse coords: {d}, {d}. Screen {d}, {d}", .{mouse_x, mouse_y, screen_dimensions.width, screen_dimensions.height});
                 if(mouse_x < 3 and mouse_y < 3) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .bottom_left);
@@ -1909,19 +1909,19 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
                 }
             }
 
-            if(@floatToInt(u16, mouse_coordinates.y) > screen_dimensions.height or @floatToInt(u16, mouse_coordinates.x) > screen_dimensions.width) {
+            if(@as(u16, @intFromFloat(mouse_coordinates.y)) > screen_dimensions.height or @as(u16, @intFromFloat(mouse_coordinates.x)) > screen_dimensions.width) {
                 return;
             }
 
             if(draw_window_decorations_requested and mouse_button == .left) {
                 // Start interactive window move if mouse coordinates are in window decorations bounds
-                if(@floatToInt(u32, mouse_coordinates.y) <= window_decorations.height_pixels) {
+                if(@as(u32, @intFromFloat(mouse_coordinates.y)) <= window_decorations.height_pixels) {
                     client.xdg_toplevel.move(client.seat, button.serial);
                 }
                 const end_x = exit_button_extent.x + exit_button_extent.width;
                 const end_y = exit_button_extent.y + exit_button_extent.height;
-                const mouse_x = @floatToInt(u16, mouse_coordinates.x);
-                const mouse_y = screen_dimensions.height - @floatToInt(u16, mouse_coordinates.y);
+                const mouse_x: u16 = @intFromFloat(mouse_coordinates.x);
+                const mouse_y: u16 = screen_dimensions.height - @as(u16, @intFromFloat(mouse_coordinates.y));
                 const is_within_bounds = (mouse_x >= exit_button_extent.x and mouse_y >= exit_button_extent.y and mouse_x <= end_x and mouse_y <= end_y);
                 if(is_within_bounds) {
                     std.log.info("Close button clicked. Shutdown requested.", .{});
@@ -1953,17 +1953,17 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, client: *W
     switch (event) {
         .global => |global| {
             std.log.info("Wayland: {s}", .{global.interface});
-            if (std.cstr.cmp(global.interface, wl.Compositor.getInterface().name) == 0) {
+            if (std.mem.orderZ(u8, global.interface, wl.Compositor.getInterface().name) == .eq) {
                 client.compositor = registry.bind(global.name, wl.Compositor, 4) catch return;
-            } else if (std.cstr.cmp(global.interface, xdg.WmBase.getInterface().name) == 0) {
+            } else if (std.mem.orderZ(u8, global.interface, xdg.WmBase.getInterface().name) == .eq) {
                 client.xdg_wm_base = registry.bind(global.name, xdg.WmBase, 3) catch return;
-            } else if (std.cstr.cmp(global.interface, wl.Seat.getInterface().name) == 0) {
+            } else if (std.mem.orderZ(u8, global.interface, wl.Seat.getInterface().name) == .eq) {
                 client.seat = registry.bind(global.name, wl.Seat, 5) catch return;
                 client.pointer = client.seat.getPointer() catch return;
                 client.pointer.setListener(*WaylandClient, pointerListener, &wayland_client);
-            } else if (std.cstr.cmp(global.interface, wl.Shm.getInterface().name) == 0) {
+            } else if (std.mem.orderZ(u8, global.interface, wl.Shm.getInterface().name) == .eq) {
                 client.cursor_shared_memory = registry.bind(global.name, wl.Shm, 1) catch return;
-            } else if (std.cstr.cmp(global.interface, zxdg.DecorationManagerV1.getInterface().name) == 0) {
+            } else if (std.mem.orderZ(u8, global.interface, zxdg.DecorationManagerV1.getInterface().name) == .eq) {
                 //
                 // TODO: Negociate with compositor how the window decorations will be drawn
                 //
@@ -2026,7 +2026,7 @@ fn recreateSwapchain(allocator: std.mem.Allocator, app: *GraphicsContext) !void 
     _ = try app.device_dispatch.waitForFences(
         app.logical_device,
         1,
-        @ptrCast([*]const vk.Fence, &app.inflight_fences[previous_frame]),
+        @ptrCast(&app.inflight_fences[previous_frame]),
         vk.TRUE,
         std.math.maxInt(u64),
     );
@@ -2095,14 +2095,14 @@ fn recreateSwapchain(allocator: std.mem.Allocator, app: *GraphicsContext) !void 
         var i: u32 = 0;
         while (i < app.swapchain_image_views.len) : (i += 1) {
             // We reuse framebuffer_create_info for each framebuffer we create, only we need to update the swapchain_image_view that is attached
-            framebuffer_create_info.p_attachments = @ptrCast([*]vk.ImageView, &app.swapchain_image_views[i]);
+            framebuffer_create_info.p_attachments = @ptrCast(&app.swapchain_image_views[i]);
             app.framebuffers[i] = try app.device_dispatch.createFramebuffer(app.logical_device, &framebuffer_create_info, null);
         }
     }
 
     const recreate_swapchain_end = std.time.nanoTimestamp();
     std.debug.assert(recreate_swapchain_end >= recreate_swapchain_start);
-    const recreate_swapchain_duration = @intCast(u64, recreate_swapchain_end - recreate_swapchain_start);
+    const recreate_swapchain_duration = @as(u64, @intCast(recreate_swapchain_end - recreate_swapchain_start));
 
     std.log.info("Swapchain recreated in {}", .{std.fmt.fmtDuration(recreate_swapchain_duration)});
 }
@@ -2119,7 +2119,7 @@ fn recordRenderPass(
     _ = try app.device_dispatch.waitForFences(
         app.logical_device,
         1,
-        @ptrCast([*]const vk.Fence, &app.inflight_fences[previous_frame]),
+        @ptrCast(&app.inflight_fences[previous_frame]),
         vk.TRUE,
         std.math.maxInt(u64),
     );
@@ -2139,7 +2139,7 @@ fn recordRenderPass(
     const clear_colors = [1]vk.ClearValue{
         vk.ClearValue{
             .color = vk.ClearColorValue{
-                .float_32 = @bitCast([4]f32, clear_color),
+                .float_32 = @bitCast(clear_color),
             },
         },
     };
@@ -2171,13 +2171,13 @@ fn recordRenderPass(
                 vk.Viewport{
                     .x = 0.0,
                     .y = 0.0,
-                    .width = @intToFloat(f32, screen_dimensions.width),
-                    .height = @intToFloat(f32, screen_dimensions.height),
+                    .width = @floatFromInt(screen_dimensions.width),
+                    .height = @floatFromInt(screen_dimensions.height),
                     .min_depth = 0.0,
                     .max_depth = 1.0,
                 },
             };
-            app.device_dispatch.cmdSetViewport(command_buffer, 0, 1, @ptrCast([*]const vk.Viewport, &viewports));
+            app.device_dispatch.cmdSetViewport(command_buffer, 0, 1, @ptrCast(&viewports));
         }
         {
             const scissors = [1]vk.Rect2D{
@@ -2192,7 +2192,7 @@ fn recordRenderPass(
                     },
                 },
             };
-            app.device_dispatch.cmdSetScissor(command_buffer, 0, 1, @ptrCast([*]const vk.Rect2D, &scissors));
+            app.device_dispatch.cmdSetScissor(command_buffer, 0, 1, @ptrCast(&scissors));
         }
 
         app.device_dispatch.cmdBindVertexBuffers(command_buffer, 0, 1, &[1]vk.Buffer{texture_vertices_buffer}, &[1]vk.DeviceSize{0});
@@ -2209,9 +2209,9 @@ fn recordRenderPass(
         );
         
         const push_constant = PushConstant {
-            .width = @intToFloat(f32, screen_dimensions.width),       
-            .height = @intToFloat(f32, screen_dimensions.height),
-            .frame = @intToFloat(f32, frame_count),
+            .width = @floatFromInt(screen_dimensions.width),       
+            .height = @floatFromInt(screen_dimensions.height),
+            .frame = @floatFromInt(frame_count),
         };
        
         app.device_dispatch.cmdPushConstants(
@@ -2234,7 +2234,7 @@ fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     _ = try app.device_dispatch.waitForFences(
         app.logical_device,
         1,
-        @ptrCast([*]const vk.Fence, &app.inflight_fences[current_frame]),
+        @ptrCast(&app.inflight_fences[current_frame]),
         vk.TRUE,
         std.math.maxInt(u64),
     );
@@ -2275,18 +2275,18 @@ fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     const command_submit_info = vk.SubmitInfo{
         .wait_semaphore_count = 1,
         .p_wait_semaphores = &wait_semaphores,
-        .p_wait_dst_stage_mask = @ptrCast([*]align(4) const vk.PipelineStageFlags, &wait_stages),
+        .p_wait_dst_stage_mask = @ptrCast(@alignCast(&wait_stages)),
         .command_buffer_count = 1,
-        .p_command_buffers = @ptrCast([*]vk.CommandBuffer, &app.command_buffers[swapchain_image_index]),
+        .p_command_buffers = @ptrCast(&app.command_buffers[swapchain_image_index]),
         .signal_semaphore_count = 1,
         .p_signal_semaphores = &signal_semaphores,
     };
 
-    try app.device_dispatch.resetFences(app.logical_device, 1, @ptrCast([*]const vk.Fence, &app.inflight_fences[current_frame]));
+    try app.device_dispatch.resetFences(app.logical_device, 1, @ptrCast(&app.inflight_fences[current_frame]));
     try app.device_dispatch.queueSubmit(
         app.graphics_present_queue,
         1,
-        @ptrCast([*]const vk.SubmitInfo, &command_submit_info),
+        @ptrCast(&command_submit_info),
         app.inflight_fences[current_frame],
     );
 
@@ -2296,7 +2296,7 @@ fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         .p_wait_semaphores = &signal_semaphores,
         .swapchain_count = 1,
         .p_swapchains = &swapchains,
-        .p_image_indices = @ptrCast([*]const u32, &swapchain_image_index),
+        .p_image_indices = @ptrCast(&swapchain_image_index),
         .p_results = null,
     };
 
@@ -2403,7 +2403,7 @@ fn createRenderPass(app: GraphicsContext) !vk.RenderPass {
 }
 
 fn createDescriptorPool(app: GraphicsContext) !vk.DescriptorPool {
-    const image_count: u32 = @intCast(u32, app.swapchain_image_views.len);
+    const image_count: u32 = @intCast(app.swapchain_image_views.len);
     const descriptor_pool_sizes = [_]vk.DescriptorPoolSize{
         .{
             .@"type" = .sampler,
@@ -2435,7 +2435,7 @@ fn createDescriptorSetLayouts(allocator: std.mem.Allocator, app: GraphicsContext
         }};
         const descriptor_set_layout_create_info = vk.DescriptorSetLayoutCreateInfo{
             .binding_count = 1,
-            .p_bindings = @ptrCast([*]const vk.DescriptorSetLayoutBinding, &descriptor_set_layout_bindings[0]),
+            .p_bindings = @ptrCast(&descriptor_set_layout_bindings[0]),
             .flags = .{},
         };
         descriptor_set_layouts[0] = try app.device_dispatch.createDescriptorSetLayout(
@@ -2458,7 +2458,7 @@ fn createDescriptorSets(
     app: GraphicsContext, 
     descriptor_set_layouts: []vk.DescriptorSetLayout
 ) ![]vk.DescriptorSet {
-    const swapchain_image_count: u32 = @intCast(u32, app.swapchain_image_views.len);
+    const swapchain_image_count: u32 = @intCast(app.swapchain_image_views.len);
 
     // 1. Allocate DescriptorSets from DescriptorPool
     var descriptor_sets = try allocator.alloc(vk.DescriptorSet, swapchain_image_count);
@@ -2471,7 +2471,7 @@ fn createDescriptorSets(
         try app.device_dispatch.allocateDescriptorSets(
             app.logical_device, 
             &descriptor_set_allocator_info, 
-            @ptrCast([*]vk.DescriptorSet, descriptor_sets.ptr)
+            @ptrCast(descriptor_sets.ptr)
         );
     }
 
@@ -2531,7 +2531,7 @@ fn createPipelineLayout(app: GraphicsContext, descriptor_set_layouts: []vk.Descr
         .set_layout_count = 1,
         .p_set_layouts = descriptor_set_layouts.ptr,
         .push_constant_range_count = 1,
-        .p_push_constant_ranges = @ptrCast([*]const vk.PushConstantRange, &push_constant),
+        .p_push_constant_ranges = @ptrCast(&push_constant),
         .flags = .{},
     };
     return try app.device_dispatch.createPipelineLayout(app.logical_device, &pipeline_layout_create_info, null);
@@ -2591,10 +2591,10 @@ fn createGraphicsPipeline(
     };
 
     const vertex_input_info = vk.PipelineVertexInputStateCreateInfo{
-        .vertex_binding_description_count = @intCast(u32, 1),
-        .vertex_attribute_description_count = @intCast(u32, 3),
-        .p_vertex_binding_descriptions = @ptrCast([*]const vk.VertexInputBindingDescription, &vertex_input_binding_descriptions),
-        .p_vertex_attribute_descriptions = @ptrCast([*]const vk.VertexInputAttributeDescription, &vertex_input_attribute_descriptions),
+        .vertex_binding_description_count = @intCast(1),
+        .vertex_attribute_description_count = @intCast(3),
+        .p_vertex_binding_descriptions = @ptrCast(&vertex_input_binding_descriptions),
+        .p_vertex_attribute_descriptions = @ptrCast(&vertex_input_attribute_descriptions),
         .flags = .{},
     };
 
@@ -2608,8 +2608,8 @@ fn createGraphicsPipeline(
         vk.Viewport{
             .x = 0.0,
             .y = 0.0,
-            .width = @intToFloat(f32, screen_dimensions.width),
-            .height = @intToFloat(f32, screen_dimensions.height),
+            .width = @floatFromInt(screen_dimensions.width),
+            .height = @floatFromInt(screen_dimensions.height),
             .min_depth = 0.0,
             .max_depth = 1.0,
         },
@@ -2676,7 +2676,7 @@ fn createGraphicsPipeline(
         .logic_op_enable = vk.FALSE,
         .logic_op = .copy,
         .attachment_count = 1,
-        .p_attachments = @ptrCast([*]const vk.PipelineColorBlendAttachmentState, &color_blend_attachment),
+        .p_attachments = @ptrCast(&color_blend_attachment),
         .blend_constants = blend_constants,
         .flags = .{},
     };
@@ -2684,7 +2684,7 @@ fn createGraphicsPipeline(
     const dynamic_states = [_]vk.DynamicState{ .viewport, .scissor };
     const dynamic_state_create_info = vk.PipelineDynamicStateCreateInfo {
         .dynamic_state_count = 2,
-        .p_dynamic_states = @ptrCast([*]const vk.DynamicState, &dynamic_states),
+        .p_dynamic_states = @ptrCast(&dynamic_states),
         .flags = .{},
     };
 
@@ -2717,7 +2717,7 @@ fn createGraphicsPipeline(
         1, 
         &pipeline_create_infos, 
         null, 
-        @ptrCast([*]vk.Pipeline, &graphics_pipeline)
+        @ptrCast(&graphics_pipeline)
     );
 
     return graphics_pipeline;
@@ -2727,7 +2727,7 @@ fn cleanupSwapchain(allocator: std.mem.Allocator, app: *GraphicsContext) void {
     app.device_dispatch.freeCommandBuffers(
         app.logical_device,
         app.command_pool,
-        @intCast(u32, app.command_buffers.len),
+        @intCast(app.command_buffers.len),
         app.command_buffers.ptr,
     );
     allocator.free(app.command_buffers);
@@ -2755,7 +2755,7 @@ fn createFramebuffers(allocator: std.mem.Allocator, app: GraphicsContext) ![]vk.
     while (i < app.swapchain_image_views.len) : (i += 1) {
         // We reuse framebuffer_create_info for each framebuffer we create, 
         // we only need to update the swapchain_image_view that is attached
-        framebuffer_create_info.p_attachments = @ptrCast([*]vk.ImageView, &app.swapchain_image_views[i]);
+        framebuffer_create_info.p_attachments = @ptrCast(&app.swapchain_image_views[i]);
         framebuffers[i] = try app.device_dispatch.createFramebuffer(app.logical_device, &framebuffer_create_info, null);
     }
     return framebuffers;
@@ -2768,7 +2768,7 @@ fn createFramebuffers(allocator: std.mem.Allocator, app: GraphicsContext) ![]vk.
 fn createFragmentShaderModule(app: GraphicsContext) !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shaders.fragment_spv.len,
-        .p_code = @ptrCast([*]const u32, @alignCast(4, shaders.fragment_spv)),
+        .p_code = @ptrCast(@alignCast(shaders.fragment_spv)),
         .flags = .{},
     };
     return try app.device_dispatch.createShaderModule(app.logical_device, &create_info, null);
@@ -2777,7 +2777,7 @@ fn createFragmentShaderModule(app: GraphicsContext) !vk.ShaderModule {
 fn createVertexShaderModule(app: GraphicsContext) !vk.ShaderModule {
     const create_info = vk.ShaderModuleCreateInfo{
         .code_size = shaders.vertex_spv.len,
-        .p_code = @ptrCast([*]const u32, @alignCast(4, shaders.vertex_spv)),
+        .p_code = @ptrCast(@alignCast(shaders.vertex_spv)),
         .flags = .{},
     };
     return try app.device_dispatch.createShaderModule(app.logical_device, &create_info, null);
