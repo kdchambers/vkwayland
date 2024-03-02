@@ -636,7 +636,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
 
-    var allocator = gpa.allocator();
+    const allocator = gpa.allocator();
 
     var graphics_context: GraphicsContext = undefined;
 
@@ -1160,7 +1160,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         const minimum_space_required: u32 = mib * 20;
 
         var memory_type_index: u32 = 0;
-        var memory_type_count = memory_properties.memory_type_count;
+        const memory_type_count = memory_properties.memory_type_count;
 
         var suitable_memory_type_index_opt: ?u32 = null;
 
@@ -1222,7 +1222,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     const texture_memory_requirements = app.device_dispatch.getImageMemoryRequirements(app.logical_device, texture_image);
 
-    var image_memory = try app.device_dispatch.allocateMemory(app.logical_device, &vk.MemoryAllocateInfo{
+    const image_memory = try app.device_dispatch.allocateMemory(app.logical_device, &vk.MemoryAllocateInfo{
         .allocation_size = texture_memory_requirements.size,
         .memory_type_index = mesh_memory_index,
     }, null);
@@ -1282,7 +1282,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
         try app.device_dispatch.bindBufferMemory(app.logical_device, staging_buffer, staging_memory, 0);
         {
-            var mapped_memory_ptr = (try app.device_dispatch.mapMemory(app.logical_device, staging_memory, 0, staging_memory, .{})).?;
+            const mapped_memory_ptr = (try app.device_dispatch.mapMemory(app.logical_device, staging_memory, 0, staging_memory, .{})).?;
             texture_memory_map = @ptrCast(@alignCast(mapped_memory_ptr));
         }
 
@@ -1366,7 +1366,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         std.debug.assert(texture_layer_size <= texture_memory_requirements.size);
         std.debug.assert(texture_memory_requirements.alignment >= 16);
         {
-            var mapped_memory_ptr = (try app.device_dispatch.mapMemory(app.logical_device, image_memory, 0, texture_layer_size, .{})).?;
+            const mapped_memory_ptr = (try app.device_dispatch.mapMemory(app.logical_device, image_memory, 0, texture_layer_size, .{})).?;
             texture_memory_map = @ptrCast(@alignCast(mapped_memory_ptr));
         }
 
@@ -1563,7 +1563,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             return error.FailedToGetSwapchainImagesCount;
         }
 
-        var swapchain_images = try allocator.alloc(vk.Image, image_count);
+        const swapchain_images = try allocator.alloc(vk.Image, image_count);
         if (.success != (try app.device_dispatch.getSwapchainImagesKHR(app.logical_device, app.swapchain, &image_count, swapchain_images.ptr))) {
             return error.FailedToGetSwapchainImages;
         }
@@ -1576,7 +1576,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     std.debug.assert(vertices_range_index_begin + vertices_range_size <= memory_size);
 
-    var mesh_memory = try app.device_dispatch.allocateMemory(app.logical_device, &vk.MemoryAllocateInfo{
+    const mesh_memory = try app.device_dispatch.allocateMemory(app.logical_device, &vk.MemoryAllocateInfo{
         .allocation_size = memory_size,
         .memory_type_index = mesh_memory_index,
     }, null);
@@ -2461,7 +2461,7 @@ fn createDescriptorSets(
     const swapchain_image_count: u32 = @intCast(app.swapchain_image_views.len);
 
     // 1. Allocate DescriptorSets from DescriptorPool
-    var descriptor_sets = try allocator.alloc(vk.DescriptorSet, swapchain_image_count);
+    const descriptor_sets = try allocator.alloc(vk.DescriptorSet, swapchain_image_count);
     {
         const descriptor_set_allocator_info = vk.DescriptorSetAllocateInfo{
             .descriptor_pool = app.descriptor_pool,
@@ -2802,7 +2802,7 @@ fn selectSurfaceFormat(
         return error.VulkanSurfaceContainsNoSupportedFormats;
     }
 
-    var formats: []vk.SurfaceFormatKHR = try allocator.alloc(vk.SurfaceFormatKHR, format_count);
+    const formats: []vk.SurfaceFormatKHR = try allocator.alloc(vk.SurfaceFormatKHR, format_count);
     defer allocator.free(formats);
 
     if (.success != (try app.instance_dispatch.getPhysicalDeviceSurfaceFormatsKHR(app.physical_device, app.surface, &format_count, formats.ptr))) {
@@ -2854,7 +2854,7 @@ fn printVulkanMemoryHeap(memory_properties: vk.PhysicalDeviceMemoryProperties, h
 }
 
 fn printVulkanMemoryHeaps(memory_properties: vk.PhysicalDeviceMemoryProperties, comptime indent_level: u32) void {
-    var heap_count: u32 = memory_properties.memory_heap_count;
+    const heap_count: u32 = memory_properties.memory_heap_count;
     var heap_i: u32 = 0;
     while (heap_i < heap_count) : (heap_i += 1) {
         printVulkanMemoryHeap(memory_properties, heap_i, indent_level);
