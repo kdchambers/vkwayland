@@ -645,10 +645,13 @@ pub fn main() !void {
 
     cleanup(allocator, &graphics_context);
 
+    waylandDeinit();
+
     std.log.info("Terminated cleanly", .{});
 }
 
 fn cleanup(allocator: std.mem.Allocator, app: *GraphicsContext) void {
+
     cleanupSwapchain(allocator, app);
 
     allocator.free(app.images_available);
@@ -674,7 +677,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
     background_color_loop_time_base = std.time.milliTimestamp();
 
-    while (!is_shutdown_requested) {
+    while (true) {
         frame_count += 1;
 
         const frame_start_ns = std.time.nanoTimestamp();
@@ -780,6 +783,15 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
 
         const frame_completion_ns = std.time.nanoTimestamp();
         frame_duration_total_ns += @as(u64, @intCast(frame_completion_ns - frame_start_ns));
+
+        //
+        // Putting this condition in the while above is triggering some sort
+        // of bug that causes the entire compositor to need to restart
+        //
+        if(is_shutdown_requested)
+        {
+            break;
+        }
     }
 
     std.log.info("Run time: {d}", .{std.fmt.fmtDuration(frame_duration_total_ns)});
@@ -2013,6 +2025,32 @@ fn waylandSetup() !void {
     wayland_client.cursor_theme = try wl.CursorTheme.load(null, cursor_size, wayland_client.cursor_shared_memory);
     wayland_client.cursor = wayland_client.cursor_theme.getCursor(XCursor.left_ptr).?;
     wayland_client.xcursor = XCursor.left_ptr;
+}
+
+fn waylandDeinit() void
+{
+    wayland_client.cursor_theme.destroy();
+    wayland_client.cursor_surface.destroy();
+
+    wayland_client.frame_callback.destroy();
+
+    wayland_client.pointer.release();
+    wayland_client.seat.release();
+
+    wayland_client.xdg_toplevel.destroy();
+    wayland_client.xdg_surface.destroy();
+
+    wayland_client.surface.destroy();
+
+    wayland_client.cursor_shared_memory.destroy();
+
+    wayland_client.xdg_wm_base.destroy();
+
+    wayland_client.compositor.destroy();
+
+    wayland_client.registry.destroy();
+
+    wayland_client.display.disconnect();
 }
 
 //
