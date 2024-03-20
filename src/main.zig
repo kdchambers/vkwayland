@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2022 Keith Chambers
+// Copyright (c) 2024 Keith Chambers
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -20,7 +20,6 @@ const clib = @cImport({
 // TODO:
 // - Audit memory allocation overall
 // - Audit logging
-// - vulkan: Destroy all vulkan objects
 // - vulkan: Audit staging_buffer code
 // - vulkan: Use a separate memory type for texture data
 
@@ -646,6 +645,10 @@ pub fn main() !void {
     try setup(allocator, &graphics_context);
     try appLoop(allocator, &graphics_context);
 
+    wayland_client.xdg_toplevel.destroy();
+    wayland_client.xdg_surface.destroy();
+    wayland_client.surface.destroy();
+
     cleanup(allocator, &graphics_context);
 
     waylandDeinit();
@@ -837,6 +840,10 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     std.log.info("Slowest: {}", .{std.fmt.fmtDuration(slowest_frame_ns)});
     std.log.info("Fastest: {}", .{std.fmt.fmtDuration(fastest_frame_ns)});
     std.log.info("Average: {}", .{std.fmt.fmtDuration((frame_duration_awake_ns / frame_count))});
+
+    // For some reason the vkwayland is causing gnome shell to crash
+    // on shutdown without this wait
+    std.time.sleep(std.time.ns_per_ms * 50);
 
     try app.device_dispatch.deviceWaitIdle(app.logical_device);
 }
@@ -2026,7 +2033,9 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, client: *W
                 draw_window_decorations_requested = false;
             }
         },
-        .global_remove => {},
+        .global_remove => |remove| {
+            std.log.info("Wayland global removed: {d}", .{remove.name});
+        },
     }
 }
 
@@ -2041,12 +2050,15 @@ fn waylandSetup() !void {
     wayland_client.xdg_wm_base.setListener(*WaylandClient, xdgWmBaseListener, &wayland_client);
 
     wayland_client.surface = try wayland_client.compositor.createSurface();
-    wayland_client.xdg_surface = try wayland_client.xdg_wm_base.getXdgSurface(wayland_client.surface);
 
+    wayland_client.xdg_surface = try wayland_client.xdg_wm_base.getXdgSurface(wayland_client.surface);
     wayland_client.xdg_surface.setListener(*wl.Surface, xdgSurfaceListener, wayland_client.surface);
 
     wayland_client.xdg_toplevel = try wayland_client.xdg_surface.getToplevel();
     wayland_client.xdg_toplevel.setListener(*bool, xdgToplevelListener, &is_shutdown_requested);
+
+    wayland_client.xdg_toplevel.setTitle("vkwayland");
+    wayland_client.xdg_toplevel.setAppId("kdchambers.vkwayland");
 
     wayland_client.frame_callback = try wayland_client.surface.frame();
     wayland_client.frame_callback.setListener(*WaylandClient, frameListener, &wayland_client);
@@ -2073,27 +2085,18 @@ fn waylandSetup() !void {
 
 fn waylandDeinit() void
 {
-    wayland_client.cursor_theme.destroy();
     wayland_client.cursor_surface.destroy();
+    wayland_client.cursor_theme.destroy();
 
-    wayland_client.frame_callback.destroy();
+    wayland_client.cursor_shared_memory.destroy();
 
     wayland_client.pointer.release();
     wayland_client.seat.release();
 
-    wayland_client.xdg_toplevel.destroy();
-    wayland_client.xdg_surface.destroy();
-
-    wayland_client.surface.destroy();
-
-    wayland_client.cursor_shared_memory.destroy();
-
     wayland_client.xdg_wm_base.destroy();
-
     wayland_client.compositor.destroy();
-
     wayland_client.registry.destroy();
-
+    _ = wayland_client.display.flush();
     wayland_client.display.disconnect();
 }
 
