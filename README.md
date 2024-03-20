@@ -31,10 +31,11 @@ Additionally, feature requests, questions and discussions are in scope for the p
 
 ## Requirements 
 
-- Master build of [zig](https://github.com/ziglang/zig) (Tested with 0.12.0-dev.3180)
+- [zig](https://github.com/ziglang/zig) (Tested with 0.12.0-dev.3180)
 - Wayland system (mutter, river, sway, etc)
-- libwayland-client (Removal of dependency is a TODO)
-- libwayland-cursor (Removal of dependency is a TODO)
+- libwayland-client
+- libwayland-cursor
+- vulkan validation layers (Optional, only in Debug mode)
 
 ## Running 
 
