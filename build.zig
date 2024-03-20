@@ -1,22 +1,27 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2022 Keith Chambers
+// Copyright (c) 2024 Keith Chambers
 
 const std = @import("std");
 
-const Builder = std.build.Builder;
-const Build = std.build;
+const Build = std.Build;
 const Pkg = Build.Pkg;
 
 const vkgen = @import("deps/vulkan-zig/generator/index.zig");
-const ScanProtocolsStep = @import("deps/zig-wayland/build.zig").ScanProtocolsStep;
+const Scanner = @import("deps/zig-wayland/build.zig").Scanner;
 
-pub fn build(b: *Builder) void {
+pub fn build(b: *Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const scanner = ScanProtocolsStep.create(b);
-    scanner.addProtocolPath("deps/wayland-protocols/stable/xdg-shell/xdg-shell.xml");
-    scanner.addProtocolPath("deps/wayland-protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml");
+    const scanner = try Scanner.create(b, .{
+        // .wayland_xml_path = "/usr/share/wayland/wayland.xml",
+        // .wayland_protocols_path = "/usr/share/wayland-protocols",
+        .target = target,
+    });
+    const wayland_module = b.createModule(.{ .root_source_file = scanner.result });
+
+    scanner.addCustomProtocol("deps/wayland-protocols/stable/xdg-shell/xdg-shell.xml");
+    scanner.addCustomProtocol("deps/wayland-protocols/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml");
 
     scanner.generate("xdg_wm_base", 2);
     scanner.generate("wl_compositor", 4);
@@ -32,28 +37,24 @@ pub fn build(b: *Builder) void {
         .optimize = optimize,
     });
 
-    const gen = vkgen.VkGenerateStep.create(b, "deps/vk.xml");
-    exe.addModule("vulkan", gen.getModule());
-
-    const shaders_module = b.createModule(.{
-        .source_file = .{ .path = "shaders/shaders.zig" },
-        .dependencies = &.{},
+    const shader_module = b.createModule(.{
+        .root_source_file = .{ .path = "shaders/shaders.zig" },
     });
-    exe.addModule("shaders", shaders_module);
-
-    const wayland_module = b.createModule(.{
-        .source_file = .{ .generated = &scanner.result },
-        .dependencies = &.{},
-    });
-    exe.addModule("wayland", wayland_module);
-
-    exe.step.dependOn(&scanner.step);
 
     const zigimg_module = b.createModule(.{
-        .source_file = .{ .path = "deps/zigimg/zigimg.zig" },
-        .dependencies = &.{},
+        .root_source_file = .{ .path = "deps/zigimg/zigimg.zig" },
     });
-    exe.addModule("zigimg", zigimg_module);
+
+    const gen = vkgen.VkGenerateStep.create(b, "deps/vk.xml");
+
+    const vulkan_module = b.createModule(.{
+        .root_source_file = gen.getSource(),
+    });
+
+    exe.root_module.addImport("shaders", shader_module);
+    exe.root_module.addImport("zigimg", zigimg_module);
+    exe.root_module.addImport("vulkan", vulkan_module);
+    exe.root_module.addImport("wayland", wayland_module);
 
     exe.linkLibC();
     exe.linkSystemLibrary("wayland-client");
