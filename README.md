@@ -39,9 +39,9 @@ Additionally, feature requests, questions and discussions are in scope for the p
 
 ## Running 
 
-    git clone --recurse-submodules https://github.com/kdchambers/vkwayland
+    git clone https://github.com/kdchambers/vkwayland
     cd vkwayland
-    zig build run -Drelease-safe
+    zig build run -Doptimize=ReleaseSafe
 
 **NOTE**: If you run the application in debug mode, you will get an error if vulkan validation layers aren't installed on your system.
 

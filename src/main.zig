@@ -2,6 +2,7 @@
 // Copyright (c) 2024 Keith Chambers
 
 const std = @import("std");
+const Io = std.Io;
 const builtin = @import("builtin");
 const vk = @import("vulkan");
 const vulkan_config = @import("vulkan_config.zig");
@@ -259,7 +260,7 @@ const validation_layers = if (enable_validation_layers)
 else
     [*:0]const u8{};
 
-const device_extensions = [_][*:0]const u8{vk.extension_info.khr_swapchain.name};
+const device_extensions = [_][*:0]const u8{vk.extensions.khr_swapchain.name};
 const surface_extensions = [_][*:0]const u8{ "VK_KHR_surface", "VK_KHR_wayland_surface" };
 
 var is_draw_required: bool = true;
@@ -442,7 +443,7 @@ fn QuadFaceWriter(comptime VertexType: type) type {
 
 const graphics = struct {
     fn TypeOfField(comptime t: anytype, comptime field_name: []const u8) type {
-        for (@typeInfo(t).Struct.fields) |field| {
+        for (@typeInfo(t).@"struct".fields) |field| {
             if (std.mem.eql(u8, field.name, field_name)) {
                 return field.type;
             }
@@ -634,22 +635,20 @@ const PushConstant = packed struct {
     frame: f32,
 };
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const io = init.io;
 
     var graphics_context: GraphicsContext = undefined;
 
-    try setup(allocator, &graphics_context);
-    try appLoop(allocator, &graphics_context);
+    try setup(gpa, io, &graphics_context);
+    try appLoop(gpa, io, &graphics_context);
 
     wayland_client.xdg_toplevel.destroy();
     wayland_client.xdg_surface.destroy();
     wayland_client.surface.destroy();
 
-    cleanup(allocator, &graphics_context);
+    cleanup(gpa, &graphics_context);
 
     waylandDeinit();
 
@@ -674,7 +673,7 @@ fn cleanup(allocator: std.mem.Allocator, app: *GraphicsContext) void {
 
     app.device_dispatch.destroyRenderPass(app.logical_device, app.render_pass, null);
 
-    app.device_dispatch.freeCommandBuffers(app.logical_device, app.command_pool, @intCast(app.command_buffers.len), app.command_buffers.ptr);
+    app.device_dispatch.freeCommandBuffers(app.logical_device, app.command_pool, app.command_buffers);
     allocator.free(app.command_buffers);
 
     app.device_dispatch.destroyShaderModule(app.logical_device, app.vertex_shader_module, null);
@@ -718,19 +717,19 @@ fn cleanup(allocator: std.mem.Allocator, app: *GraphicsContext) void {
     app.instance_dispatch.destroyInstance(app.instance, null);
 }
 
-fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
+fn appLoop(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
 
     const target_ms_per_frame: u32 = 1000 / input_fps;
     const target_ns_per_frame = target_ms_per_frame * std.time.ns_per_ms;
 
     std.log.info("Target milliseconds / frame: {d}", .{target_ms_per_frame});
 
-    background_color_loop_time_base = std.time.milliTimestamp();
+    background_color_loop_time_base = Io.Clock.real.now(io).toMilliseconds();
 
     while (!is_shutdown_requested) {
         frame_count += 1;
 
-        const frame_start_ns = std.time.nanoTimestamp();
+        const frame_start_ns = Io.Clock.real.now(io).toNanoseconds();
 
         // NOTE: Running this at a high `input_fps` (E.g 60) seems to put a lot of strain on 
         //       the wayland compositor. On my system with sway and river I've seen the 
@@ -746,7 +745,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             app.swapchain_extent.height = screen_dimensions.height;
             is_draw_required = true;
             framebuffer_resized = false;
-            try recreateSwapchain(allocator, app);
+            try recreateSwapchain(allocator, io, app);
         }
 
         if(is_draw_required) {
@@ -763,7 +762,7 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             // Update our background
             //
 
-            const current_time = std.time.milliTimestamp();
+            const current_time = Io.Clock.real.now(io).toMilliseconds();
             std.debug.assert(current_time >= background_color_loop_time_base);
 
             const loop_ms: f64 = @floatFromInt(background_color_loop_ms);
@@ -803,13 +802,13 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
             // Even though we're running at a constant loop, we don't always need to re-record command buffers
             if(is_record_requested) {
                 is_record_requested = false;
-                try recordRenderPass(app.*, vertex_buffer_quad_count * 6);
+                try recordRenderPass(io, app.*, vertex_buffer_quad_count * 6);
             }
 
-            try renderFrame(allocator, app);
+            try renderFrame(allocator, io, app);
         }
 
-        const frame_end_ns = std.time.nanoTimestamp();
+        const frame_end_ns = Io.Clock.real.now(io).toNanoseconds();
         std.debug.assert(frame_end_ns >= frame_start_ns);
 
         const frame_duration_ns: u64 = @intCast(frame_end_ns - frame_start_ns);
@@ -826,24 +825,24 @@ fn appLoop(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         const remaining_ns: u64 = target_ns_per_frame - @as(u64, @intCast(frame_duration_ns));
         std.debug.assert(remaining_ns <= target_ns_per_frame);
 
-        const frame_work_completed_ns = std.time.nanoTimestamp();
+        const frame_work_completed_ns = Io.Clock.real.now(io).toNanoseconds();
         frame_duration_awake_ns += @as(u64, @intCast(frame_work_completed_ns - frame_start_ns));
 
-        std.time.sleep(remaining_ns);
+        try io.sleep(.{ .nanoseconds = remaining_ns }, Io.Clock.real);
 
-        const frame_completion_ns = std.time.nanoTimestamp();
+        const frame_completion_ns = Io.Clock.real.now(io).toNanoseconds();
         frame_duration_total_ns += @as(u64, @intCast(frame_completion_ns - frame_start_ns));
     }
 
-    std.log.info("Run time: {d}", .{std.fmt.fmtDuration(frame_duration_total_ns)});
+    std.log.info("Run time: {d}", .{frame_duration_total_ns});
     std.log.info("Frame count: {d}", .{frame_count});
-    std.log.info("Slowest: {}", .{std.fmt.fmtDuration(slowest_frame_ns)});
-    std.log.info("Fastest: {}", .{std.fmt.fmtDuration(fastest_frame_ns)});
-    std.log.info("Average: {}", .{std.fmt.fmtDuration((frame_duration_awake_ns / frame_count))});
+    std.log.info("Slowest: {}", Io.Duration.fromNanoseconds(slowest_frame_ns));
+    std.log.info("Fastest: {}", Io.Duration.fromNanoseconds(fastest_frame_ns));
+    std.log.info("Average: {}", Io.Duration.fromNanoseconds(frame_duration_awake_ns / frame_count));
 
     // For some reason the vkwayland is causing gnome shell to crash
     // on shutdown without this wait
-    std.time.sleep(std.time.ns_per_ms * 50);
+    try io.sleep(Io.Duration.fromMilliseconds(50), Io.Clock.real);
 
     try app.device_dispatch.deviceWaitIdle(app.logical_device);
 }
@@ -992,7 +991,7 @@ fn draw() !void {
     }
 }
 
-fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
+fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
     try waylandSetup();
 
     const vulkan_lib_symbol = comptime switch(builtin.os.tag) {
@@ -1006,7 +1005,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         const vk_get_instance_proc_addr_fn_opt: ?*const fn (instance: vk.Instance, procname: [*:0]const u8) vk.PfnVoidFunction = @ptrCast(clib.dlsym(vulkan_loader, "vkGetInstanceProcAddr"));
         if (vk_get_instance_proc_addr_fn_opt) |vk_get_instance_proc_addr_fn| {
             vkGetInstanceProcAddr = vk_get_instance_proc_addr_fn;
-            app.base_dispatch = try vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
+            app.base_dispatch = vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
         } else {
             std.log.err("Failed to load vkGetInstanceProcAddr function from vulkan loader", .{});
             return error.FailedToGetVulkanSymbol;
@@ -1016,15 +1015,15 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         return error.FailedToGetVulkanSymbol;
     }
 
-    app.base_dispatch = try vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
+    app.base_dispatch = vulkan_config.BaseDispatch.load(vkGetInstanceProcAddr);
 
     app.instance = try app.base_dispatch.createInstance(&vk.InstanceCreateInfo{
         .p_application_info = &vk.ApplicationInfo{
             .p_application_name = application_name,
-            .application_version = vulkan_application_version,
+            .application_version = vulkan_application_version.toU32(),
             .p_engine_name = vulkan_engine_name,
-            .engine_version = vulkan_engine_version,
-            .api_version = vulkan_api_version,
+            .engine_version = vulkan_engine_version.toU32(),
+            .api_version = vulkan_api_version.toU32(),
         },
         .enabled_extension_count = surface_extensions.len,
         .pp_enabled_extension_names = @ptrCast(&surface_extensions),
@@ -1033,7 +1032,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         .flags = .{},
     }, null);
 
-    app.instance_dispatch = try vulkan_config.InstanceDispatch.load(app.instance, vkGetInstanceProcAddr);
+    app.instance_dispatch = vulkan_config.InstanceDispatch.load(app.instance, vkGetInstanceProcAddr);
     errdefer app.instance_dispatch.destroyInstance(app.instance, null);
 
     {
@@ -1140,7 +1139,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
                         @intCast(queue_family_i), 
                         app.surface,
                     );
-                    if (present_support != 0) {
+                    if (present_support != .false) {
                         app.graphics_present_queue_index = @intCast(queue_family_i);
                         break :outer physical_device;
                     }
@@ -1180,9 +1179,9 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         );
     }
 
-    app.device_dispatch = try vulkan_config.DeviceDispatch.load(
+    app.device_dispatch = vulkan_config.DeviceDispatch.load(
         app.logical_device,
-        app.instance_dispatch.dispatch.vkGetDeviceProcAddr,
+        app.instance_dispatch.dispatch.vkGetDeviceProcAddr.?,
     );
     app.graphics_present_queue = app.device_dispatch.getDeviceQueue(
         app.logical_device,
@@ -1432,8 +1431,9 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         // TODO: This could be done on another thread
         for(icon_path_list, 0..) |icon_path, icon_path_i| {
             // TODO: Create an  arena / allocator of a fixed size that can be reused here.
-            var icon_image = try img.Image.fromFilePath(allocator, icon_path);
-            defer icon_image.deinit();
+            var buffer: [1024]u8 = undefined;
+            var icon_image = try img.Image.fromFilePath(allocator, io, icon_path, &buffer);
+            defer icon_image.deinit(allocator);
 
             const icon_type: IconType = @enumFromInt(icon_path_i);
 
@@ -1515,7 +1515,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         const src_stage = vk.PipelineStageFlags{ .top_of_pipe_bit = true };
         const dst_stage = vk.PipelineStageFlags{ .fragment_shader_bit = true };
         const dependency_flags = vk.DependencyFlags{};
-        app.device_dispatch.cmdPipelineBarrier(command_buffer, src_stage, dst_stage, dependency_flags, 0, undefined, 0, undefined, 1, &barrier);
+        app.device_dispatch.cmdPipelineBarrier(command_buffer, src_stage, dst_stage, dependency_flags, &.{}, &.{}, &barrier);
     }
 
     try app.device_dispatch.endCommandBuffer(command_buffer);
@@ -1531,7 +1531,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     }};
 
     const barrier_fence: vk.Fence = try app.device_dispatch.createFence(app.logical_device, &.{}, null);
-    try app.device_dispatch.queueSubmit(app.graphics_present_queue, 1, &submit_command_infos, barrier_fence);
+    try app.device_dispatch.queueSubmit(app.graphics_present_queue, &submit_command_infos, barrier_fence);
 
     texture_image_view = try app.device_dispatch.createImageView(app.logical_device, &vk.ImageViewCreateInfo{
         .flags = .{},
@@ -1612,7 +1612,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         //       For that reason we don't need to query for it on our selected device
         // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VkPresentModeKHR.html
         .present_mode = .fifo_khr,
-        .clipped = vk.TRUE,
+        .clipped = .true,
         .flags = .{},
         .old_swapchain = .null_handle,
     }, null);
@@ -1753,7 +1753,7 @@ fn setup(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     app.graphics_pipeline = try createGraphicsPipeline(app.*, app.pipeline_layout, app.render_pass);
     app.framebuffers = try createFramebuffers(allocator, app.*);
 
-    _ = try app.device_dispatch.waitForFences(app.logical_device, 1, @ptrCast(&barrier_fence), vk.TRUE, std.math.maxInt(u64),);
+    _ = try app.device_dispatch.waitForFences(app.logical_device, @ptrCast(&barrier_fence), .true, std.math.maxInt(u64),);
     app.device_dispatch.destroyFence(app.logical_device, barrier_fence, null);
 }
 
@@ -2016,17 +2016,17 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, client: *W
     switch (event) {
         .global => |global| {
             std.log.info("Wayland: {s}", .{global.interface});
-            if (std.mem.orderZ(u8, global.interface, wl.Compositor.getInterface().name) == .eq) {
+            if (std.mem.orderZ(u8, global.interface, wl.Compositor.interface.name) == .eq) {
                 client.compositor = registry.bind(global.name, wl.Compositor, 4) catch return;
-            } else if (std.mem.orderZ(u8, global.interface, xdg.WmBase.getInterface().name) == .eq) {
+            } else if (std.mem.orderZ(u8, global.interface, xdg.WmBase.interface.name) == .eq) {
                 client.xdg_wm_base = registry.bind(global.name, xdg.WmBase, 3) catch return;
-            } else if (std.mem.orderZ(u8, global.interface, wl.Seat.getInterface().name) == .eq) {
+            } else if (std.mem.orderZ(u8, global.interface, wl.Seat.interface.name) == .eq) {
                 client.seat = registry.bind(global.name, wl.Seat, 5) catch return;
                 client.pointer = client.seat.getPointer() catch return;
                 client.pointer.setListener(*WaylandClient, pointerListener, &wayland_client);
-            } else if (std.mem.orderZ(u8, global.interface, wl.Shm.getInterface().name) == .eq) {
+            } else if (std.mem.orderZ(u8, global.interface, wl.Shm.interface.name) == .eq) {
                 client.cursor_shared_memory = registry.bind(global.name, wl.Shm, 1) catch return;
-            } else if (std.mem.orderZ(u8, global.interface, zxdg.DecorationManagerV1.getInterface().name) == .eq) {
+            } else if (std.mem.orderZ(u8, global.interface, zxdg.DecorationManagerV1.interface.name) == .eq) {
                 //
                 // TODO: Negociate with compositor how the window decorations will be drawn
                 //
@@ -2104,15 +2104,14 @@ fn waylandDeinit() void
 //   5. Vulkan Code
 //
 
-fn recreateSwapchain(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
+fn recreateSwapchain(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
 
-    const recreate_swapchain_start = std.time.nanoTimestamp();
+    const recreate_swapchain_start = Io.Clock.real.now(io).toNanoseconds();
 
     _ = try app.device_dispatch.waitForFences(
         app.logical_device,
-        1,
         @ptrCast(&app.inflight_fences[previous_frame]),
-        vk.TRUE,
+        .true,
         std.math.maxInt(u64),
     );
 
@@ -2138,7 +2137,7 @@ fn recreateSwapchain(allocator: std.mem.Allocator, app: *GraphicsContext) !void 
         .pre_transform = .{ .identity_bit_khr = true },
         .composite_alpha = alpha_mode,
         .present_mode = .fifo_khr,
-        .clipped = vk.TRUE,
+        .clipped = .true,
         .flags = .{},
         .old_swapchain = old_swapchain,
     }, null);
@@ -2185,14 +2184,15 @@ fn recreateSwapchain(allocator: std.mem.Allocator, app: *GraphicsContext) !void 
         }
     }
 
-    const recreate_swapchain_end = std.time.nanoTimestamp();
+    const recreate_swapchain_end = Io.Clock.real.now(io).toNanoseconds();
     std.debug.assert(recreate_swapchain_end >= recreate_swapchain_start);
     const recreate_swapchain_duration = @as(u64, @intCast(recreate_swapchain_end - recreate_swapchain_start));
 
-    std.log.info("Swapchain recreated in {}", .{std.fmt.fmtDuration(recreate_swapchain_duration)});
+    std.log.info("Swapchain recreated in {}", Io.Duration.fromNanoseconds(recreate_swapchain_duration));
 }
 
 fn recordRenderPass(
+    io: Io,
     app: GraphicsContext,
     indices_count: u32,
 ) !void {
@@ -2203,15 +2203,14 @@ fn recordRenderPass(
 
     _ = try app.device_dispatch.waitForFences(
         app.logical_device,
-        1,
         @ptrCast(&app.inflight_fences[previous_frame]),
-        vk.TRUE,
+        .true,
         std.math.maxInt(u64),
     );
 
     try app.device_dispatch.resetCommandPool(app.logical_device, app.command_pool, .{});
 
-    const current_time = std.time.milliTimestamp();
+    const current_time = Io.Clock.real.now(io).toMilliseconds();
     std.debug.assert(current_time >= background_color_loop_time_base);
 
     // This value should never been seen, as we draw a background quad over it
@@ -2262,7 +2261,7 @@ fn recordRenderPass(
                     .max_depth = 1.0,
                 },
             };
-            app.device_dispatch.cmdSetViewport(command_buffer, 0, 1, @ptrCast(&viewports));
+            app.device_dispatch.cmdSetViewport(command_buffer, 0, @ptrCast(&viewports));
         }
         {
             const scissors = [1]vk.Rect2D{
@@ -2277,20 +2276,18 @@ fn recordRenderPass(
                     },
                 },
             };
-            app.device_dispatch.cmdSetScissor(command_buffer, 0, 1, @ptrCast(&scissors));
+            app.device_dispatch.cmdSetScissor(command_buffer, 0, @ptrCast(&scissors));
         }
 
-        app.device_dispatch.cmdBindVertexBuffers(command_buffer, 0, 1, &[1]vk.Buffer{texture_vertices_buffer}, &[1]vk.DeviceSize{0});
+        app.device_dispatch.cmdBindVertexBuffers(command_buffer, 0, &[1]vk.Buffer{texture_vertices_buffer}, &[1]vk.DeviceSize{0});
         app.device_dispatch.cmdBindIndexBuffer(command_buffer, texture_indices_buffer, 0, .uint16);
         app.device_dispatch.cmdBindDescriptorSets(
             command_buffer, 
             .graphics, 
             app.pipeline_layout, 
             0, 
-            1, 
-            &[1]vk.DescriptorSet{app.descriptor_sets[i]}, 
-            0, 
-            undefined,
+            &[1]vk.DescriptorSet{app.descriptor_sets[i]},
+            &.{},
         );
         
         const push_constant = PushConstant {
@@ -2315,12 +2312,11 @@ fn recordRenderPass(
     }
 }
 
-fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
+fn renderFrame(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
     _ = try app.device_dispatch.waitForFences(
         app.logical_device,
-        1,
         @ptrCast(&app.inflight_fences[current_frame]),
-        vk.TRUE,
+        .true,
         std.math.maxInt(u64),
     );
 
@@ -2336,7 +2332,7 @@ fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     switch(acquire_image_result.result) {
         .success => {},
         .error_out_of_date_khr, .suboptimal_khr => {
-            try recreateSwapchain(allocator, app);
+            try recreateSwapchain(allocator, io, app);
             return;
         },
         .error_out_of_host_memory => { return error.VulkanHostOutOfMemory; },
@@ -2367,10 +2363,9 @@ fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
         .p_signal_semaphores = &signal_semaphores,
     };
 
-    try app.device_dispatch.resetFences(app.logical_device, 1, @ptrCast(&app.inflight_fences[current_frame]));
+    try app.device_dispatch.resetFences(app.logical_device, @ptrCast(&app.inflight_fences[current_frame]));
     try app.device_dispatch.queueSubmit(
         app.graphics_present_queue,
-        1,
         @ptrCast(&command_submit_info),
         app.inflight_fences[current_frame],
     );
@@ -2391,7 +2386,7 @@ fn renderFrame(allocator: std.mem.Allocator, app: *GraphicsContext) !void {
     switch(present_result) {
         .success => {},
         .error_out_of_date_khr, .suboptimal_khr => {
-            try recreateSwapchain(allocator, app);
+            try recreateSwapchain(allocator, io, app);
             return;
         },
         .error_out_of_host_memory => { return error.VulkanHostOutOfMemory; },
@@ -2569,13 +2564,13 @@ fn createDescriptorSets(
         .address_mode_v = .clamp_to_edge,
         .address_mode_w = .clamp_to_edge,
         .mip_lod_bias = 0.0,
-        .anisotropy_enable = vk.FALSE,
+        .anisotropy_enable = .false,
         .max_anisotropy = 16.0,
         .border_color = .int_opaque_black,
         .min_lod = 0.0,
         .max_lod = 0.0,
-        .unnormalized_coordinates = vk.FALSE,
-        .compare_enable = vk.FALSE,
+        .unnormalized_coordinates = .false,
+        .compare_enable = .false,
         .compare_op = .always,
         .mipmap_mode = .linear,
     };
@@ -2601,7 +2596,7 @@ fn createDescriptorSets(
             .p_buffer_info = undefined,
             .p_texel_buffer_view = undefined,
         }};
-        app.device_dispatch.updateDescriptorSets(app.logical_device, 1, &write_descriptor_set, 0, undefined);
+        app.device_dispatch.updateDescriptorSets(app.logical_device, &write_descriptor_set, &.{});
     }
     return descriptor_sets;
 }
@@ -2685,7 +2680,7 @@ fn createGraphicsPipeline(
 
     const input_assembly = vk.PipelineInputAssemblyStateCreateInfo{
         .topology = .triangle_list,
-        .primitive_restart_enable = vk.FALSE,
+        .primitive_restart_enable = .false,
         .flags = .{},
     };
 
@@ -2722,13 +2717,13 @@ fn createGraphicsPipeline(
     };
 
     const rasterizer = vk.PipelineRasterizationStateCreateInfo{
-        .depth_clamp_enable = vk.FALSE,
-        .rasterizer_discard_enable = vk.FALSE,
+        .depth_clamp_enable = .false,
+        .rasterizer_discard_enable = .false,
         .polygon_mode = .fill,
         .line_width = 1.0,
         .cull_mode = .{ .back_bit = true },
         .front_face = .clockwise,
-        .depth_bias_enable = vk.FALSE,
+        .depth_bias_enable = .false,
         .depth_bias_constant_factor = 0.0,
         .depth_bias_clamp = 0.0,
         .depth_bias_slope_factor = 0.0,
@@ -2736,18 +2731,18 @@ fn createGraphicsPipeline(
     };
 
     const multisampling = vk.PipelineMultisampleStateCreateInfo{
-        .sample_shading_enable = vk.FALSE,
+        .sample_shading_enable = .false,
         .rasterization_samples = .{ .@"1_bit" = true },
         .min_sample_shading = 0.0,
         .p_sample_mask = null,
-        .alpha_to_coverage_enable = vk.FALSE,
-        .alpha_to_one_enable = vk.FALSE,
+        .alpha_to_coverage_enable = .false,
+        .alpha_to_one_enable = .false,
         .flags = .{},
     };
 
     const color_blend_attachment = vk.PipelineColorBlendAttachmentState{
         .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
-        .blend_enable = if(enable_blending) vk.TRUE else vk.FALSE,
+        .blend_enable = if(enable_blending) .true else .false,
         .alpha_blend_op = .add,
         .color_blend_op = .add,
         .dst_alpha_blend_factor = .one,
@@ -2758,7 +2753,7 @@ fn createGraphicsPipeline(
 
     const blend_constants = [1]f32{0.0} ** 4;
     const color_blending = vk.PipelineColorBlendStateCreateInfo{
-        .logic_op_enable = vk.FALSE,
+        .logic_op_enable = .false,
         .logic_op = .copy,
         .attachment_count = 1,
         .p_attachments = @ptrCast(&color_blend_attachment),
@@ -2799,7 +2794,6 @@ fn createGraphicsPipeline(
     _ = try app.device_dispatch.createGraphicsPipelines(
         app.logical_device, 
         .null_handle, 
-        1, 
         &pipeline_create_infos, 
         null, 
         @ptrCast(&graphics_pipeline)
@@ -2901,7 +2895,7 @@ fn printVulkanMemoryHeap(memory_properties: vk.PhysicalDeviceMemoryProperties, h
 
     const print = std.debug.print;
     print(base_indent ++ "Heap Index #{d}\n", .{heap_index});
-    print(base_indent ++ "  Capacity:       {}\n", .{std.fmt.fmtIntSizeDec(heap_properties.size)});
+    print(base_indent ++ "  Capacity:       {B}\n", .{heap_properties.size});
     print(base_indent ++ "  Device Local:   {}\n", .{heap_properties.flags.device_local_bit});
     print(base_indent ++ "  Multi Instance: {}\n", .{heap_properties.flags.multi_instance_bit});
     print(base_indent ++ "  Memory Types:\n", .{});
