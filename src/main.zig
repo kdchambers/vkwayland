@@ -55,7 +55,7 @@ var screen_dimensions = geometry.Dimensions2D(ScreenPixelBaseType){
 /// Determines the memory allocated for storing mesh data
 /// Represents the number of quads that will be able to be drawn
 /// This can be a colored quad, or a textured quad such as a charactor
-const max_texture_quads_per_render: u32 = 1024;
+const max_texture_quads_per_render: u32 = 1024 + 512;
 
 /// Maximum number of screen framebuffers to use
 /// 2-3 would be recommented to avoid screen tearing
@@ -656,7 +656,6 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn cleanup(allocator: std.mem.Allocator, app: *GraphicsContext) void {
-
     for (app.framebuffers) |framebuffer| {
         app.device_dispatch.destroyFramebuffer(app.logical_device, framebuffer, null);
     }
@@ -681,8 +680,11 @@ fn cleanup(allocator: std.mem.Allocator, app: *GraphicsContext) void {
 
     for (0..max_frames_in_flight) |i| {
         app.device_dispatch.destroySemaphore(app.logical_device, app.images_available[i], null);
-        app.device_dispatch.destroySemaphore(app.logical_device, app.renders_finished[i], null);
         app.device_dispatch.destroyFence(app.logical_device, app.inflight_fences[i], null);
+    }
+
+    for (0..app.swapchain_images.len) |i| {
+        app.device_dispatch.destroySemaphore(app.logical_device, app.renders_finished[i], null);
     }
 
     allocator.free(app.images_available);
@@ -718,7 +720,6 @@ fn cleanup(allocator: std.mem.Allocator, app: *GraphicsContext) void {
 }
 
 fn appLoop(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
-
     const target_ms_per_frame: u32 = 1000 / input_fps;
     const target_ns_per_frame = target_ms_per_frame * std.time.ns_per_ms;
 
@@ -731,9 +732,9 @@ fn appLoop(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
 
         const frame_start_ns = Io.Clock.real.now(io).toNanoseconds();
 
-        // NOTE: Running this at a high `input_fps` (E.g 60) seems to put a lot of strain on 
-        //       the wayland compositor. On my system with sway and river I've seen the 
-        //       CPU usage of the compositor run 3 times that of this application in response 
+        // NOTE: Running this at a high `input_fps` (E.g 60) seems to put a lot of strain on
+        //       the wayland compositor. On my system with sway and river I've seen the
+        //       CPU usage of the compositor run 3 times that of this application in response
         //       to this call alone.
         // TODO: Find a more efficient way to interact with the compositor if possible
         if (.SUCCESS != wayland_client.display.roundtrip()) {
@@ -748,14 +749,14 @@ fn appLoop(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
             try recreateSwapchain(allocator, io, app);
         }
 
-        if(is_draw_required) {
+        if (is_draw_required) {
             is_draw_required = false;
             try draw();
             is_render_requested = true;
             is_record_requested = true;
         }
 
-        if(is_render_requested) {
+        if (is_render_requested) {
             is_render_requested = false;
 
             //
@@ -767,40 +768,20 @@ fn appLoop(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
 
             const loop_ms: f64 = @floatFromInt(background_color_loop_ms);
             var color_transition: f32 = @floatCast(@rem(@as(f64, @floatFromInt(current_time - background_color_loop_time_base)), loop_ms) / loop_ms);
-            if(color_transition > 0.5) {
+            if (color_transition > 0.5) {
                 color_transition = 1.0 - color_transition;
             }
 
             std.debug.assert(color_transition >= 0.0);
             std.debug.assert(color_transition <= 1.0);
 
-            background_quad[0].color = graphics.RGBA(f32){
-                .r = lerp(background_color_a[0].r, background_color_b[0].r, color_transition),
-                .g = lerp(background_color_a[0].g, background_color_b[0].g, color_transition),
-                .b = lerp(background_color_a[0].b, background_color_b[0].b, color_transition),
-                .a = 1.0
-            };
-            background_quad[1].color = graphics.RGBA(f32){
-                .r = lerp(background_color_a[1].r, background_color_b[1].r, color_transition),
-                .g = lerp(background_color_a[1].g, background_color_b[1].g, color_transition),
-                .b = lerp(background_color_a[1].b, background_color_b[1].b, color_transition),
-                .a = 1.0
-            };
-            background_quad[2].color = graphics.RGBA(f32){
-                .r = lerp(background_color_a[2].r, background_color_b[2].r, color_transition),
-                .g = lerp(background_color_a[2].g, background_color_b[2].g, color_transition),
-                .b = lerp(background_color_a[2].b, background_color_b[2].b, color_transition),
-                .a = 1.0
-            };
-            background_quad[3].color = graphics.RGBA(f32){
-                .r = lerp(background_color_a[3].r, background_color_b[3].r, color_transition),
-                .g = lerp(background_color_a[3].g, background_color_b[3].g, color_transition),
-                .b = lerp(background_color_a[3].b, background_color_b[3].b, color_transition),
-                .a = 1.0
-            };
+            background_quad[0].color = graphics.RGBA(f32){ .r = lerp(background_color_a[0].r, background_color_b[0].r, color_transition), .g = lerp(background_color_a[0].g, background_color_b[0].g, color_transition), .b = lerp(background_color_a[0].b, background_color_b[0].b, color_transition), .a = 1.0 };
+            background_quad[1].color = graphics.RGBA(f32){ .r = lerp(background_color_a[1].r, background_color_b[1].r, color_transition), .g = lerp(background_color_a[1].g, background_color_b[1].g, color_transition), .b = lerp(background_color_a[1].b, background_color_b[1].b, color_transition), .a = 1.0 };
+            background_quad[2].color = graphics.RGBA(f32){ .r = lerp(background_color_a[2].r, background_color_b[2].r, color_transition), .g = lerp(background_color_a[2].g, background_color_b[2].g, color_transition), .b = lerp(background_color_a[2].b, background_color_b[2].b, color_transition), .a = 1.0 };
+            background_quad[3].color = graphics.RGBA(f32){ .r = lerp(background_color_a[3].r, background_color_b[3].r, color_transition), .g = lerp(background_color_a[3].g, background_color_b[3].g, color_transition), .b = lerp(background_color_a[3].b, background_color_b[3].b, color_transition), .a = 1.0 };
 
             // Even though we're running at a constant loop, we don't always need to re-record command buffers
-            if(is_record_requested) {
+            if (is_record_requested) {
                 is_record_requested = false;
                 try recordRenderPass(io, app.*, vertex_buffer_quad_count * 6);
             }
@@ -852,25 +833,26 @@ fn appLoop(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
 fn draw() !void {
     const outer_margin_pixels: u32 = 20;
     const inner_margin_pixels: u32 = 10;
-    
-    const dimensions_pixels = geometry.Dimensions2D(u32) {
+
+    const dimensions_pixels = geometry.Dimensions2D(u32){
         .width = icon_dimensions.width,
         .height = icon_dimensions.height,
     };
 
-    if(draw_window_decorations_requested and screen_dimensions.height <= window_decorations.height_pixels) {
+    if (draw_window_decorations_requested and screen_dimensions.height <= window_decorations.height_pixels) {
         vertex_buffer_quad_count = 0;
         return;
     }
 
-    const available_screen_dimensions = if(draw_window_decorations_requested) 
-        geometry.Dimensions2D(u16){ .height = screen_dimensions.height - window_decorations.height_pixels, .width = screen_dimensions.width} 
-    else screen_dimensions;
+    const available_screen_dimensions = if (draw_window_decorations_requested)
+        geometry.Dimensions2D(u16){ .height = screen_dimensions.height - window_decorations.height_pixels, .width = screen_dimensions.width }
+    else
+        screen_dimensions;
 
     const insufficient_horizontal_space = (available_screen_dimensions.width < (dimensions_pixels.width + outer_margin_pixels * 2));
     const insufficient_vertical_space = (available_screen_dimensions.height < (dimensions_pixels.height + outer_margin_pixels * 2));
 
-    if(insufficient_horizontal_space or insufficient_vertical_space) {
+    if (insufficient_horizontal_space or insufficient_vertical_space) {
         vertex_buffer_quad_count = 0;
         return;
     }
@@ -880,7 +862,7 @@ fn draw() !void {
 
     {
         const required_space = dimensions_pixels.width + inner_margin_pixels;
-        while(horizonal_quad_space_pixels >= required_space) {
+        while (horizonal_quad_space_pixels >= required_space) {
             horizonal_count += 1;
             horizonal_quad_space_pixels -= required_space;
         }
@@ -891,13 +873,13 @@ fn draw() !void {
 
     {
         const required_space = dimensions_pixels.height + inner_margin_pixels;
-        while(vertical_quad_space_pixels >= required_space) {
+        while (vertical_quad_space_pixels >= required_space) {
             vertical_count += 1;
             vertical_quad_space_pixels -= required_space;
         }
     }
 
-    const y_offset_window_decorations: u32 = if(draw_window_decorations_requested) window_decorations.height_pixels else 0;
+    const y_offset_window_decorations: u32 = if (draw_window_decorations_requested) window_decorations.height_pixels else 0;
 
     const x_begin_pixels = outer_margin_pixels + (horizonal_quad_space_pixels / 2);
     const y_begin_pixels = y_offset_window_decorations + outer_margin_pixels + (vertical_quad_space_pixels / 2);
@@ -909,14 +891,14 @@ fn draw() !void {
     const stride_vertical = @as(f32, @floatFromInt((dimensions_pixels.height + inner_margin_pixels) * 2)) / @as(f32, @floatFromInt(screen_dimensions.height));
 
     var face_writer = quad_face_writer_pool.create(1, (vertices_range_size - 1) / @sizeOf(graphics.GenericVertex));
-    if(draw_window_decorations_requested) {
+    if (draw_window_decorations_requested) {
         var faces = try face_writer.allocate(3);
         const window_decoration_height = @as(f32, @floatFromInt(window_decorations.height_pixels * 2)) / @as(f32, @floatFromInt(screen_dimensions.height));
         {
             //
             // Draw window decoration topbar background
             //
-            const extent = geometry.Extent2D(f32) {
+            const extent = geometry.Extent2D(f32){
                 .x = -1.0,
                 .y = -1.0,
                 .width = 2.0,
@@ -929,7 +911,7 @@ fn draw() !void {
             // Draw exit button in window decoration topbar
             //
             std.debug.assert(window_decorations.exit_button.size_pixels <= window_decorations.height_pixels);
-            const screen_icon_dimensions = geometry.Dimensions2D(f32) {
+            const screen_icon_dimensions = geometry.Dimensions2D(f32){
                 .width = @as(f32, @floatFromInt(window_decorations.exit_button.size_pixels * 2)) / @as(f32, @floatFromInt(screen_dimensions.width)),
                 .height = @as(f32, @floatFromInt(window_decorations.exit_button.size_pixels * 2)) / @as(f32, @floatFromInt(screen_dimensions.height)),
             };
@@ -937,13 +919,13 @@ fn draw() !void {
             const outer_margin_hor = exit_button_outer_margin_pixels * 2.0 / @as(f32, @floatFromInt(screen_dimensions.width));
             const outer_margin_ver = exit_button_outer_margin_pixels * 2.0 / @as(f32, @floatFromInt(screen_dimensions.height));
             const texture_coordinates = iconTextureLookup(.close);
-            const texture_extent = geometry.Extent2D(f32) {
+            const texture_extent = geometry.Extent2D(f32){
                 .x = texture_coordinates.x,
                 .y = texture_coordinates.y,
                 .width = @as(f32, @floatFromInt(icon_dimensions.width)) / @as(f32, @floatFromInt(texture_layer_dimensions.width)),
                 .height = @as(f32, @floatFromInt(icon_dimensions.height)) / @as(f32, @floatFromInt(texture_layer_dimensions.height)),
             };
-            const extent = geometry.Extent2D(f32) {
+            const extent = geometry.Extent2D(f32){
                 .x = 1.0 - (outer_margin_hor + screen_icon_dimensions.width),
                 .y = -1.0 + outer_margin_ver,
                 .width = screen_icon_dimensions.width,
@@ -954,7 +936,7 @@ fn draw() !void {
 
             // TODO: Update on screen size change
             const exit_button_extent_outer_margin = @divExact(window_decorations.height_pixels - window_decorations.exit_button.size_pixels, 2);
-            exit_button_extent = geometry.Extent2D(u16) { // Top left anchor
+            exit_button_extent = geometry.Extent2D(u16){ // Top left anchor
                 .x = screen_dimensions.width - (window_decorations.exit_button.size_pixels + exit_button_extent_outer_margin),
                 .y = screen_dimensions.height - (window_decorations.exit_button.size_pixels + exit_button_extent_outer_margin),
                 .width = window_decorations.exit_button.size_pixels,
@@ -965,10 +947,10 @@ fn draw() !void {
     }
     var faces = try face_writer.allocate(horizonal_count * vertical_count);
     var horizonal_i: u32 = 0;
-    while(horizonal_i < horizonal_count) : (horizonal_i += 1) {
+    while (horizonal_i < horizonal_count) : (horizonal_i += 1) {
         var vertical_i: u32 = 0;
-        while(vertical_i < vertical_count) : (vertical_i += 1) {
-            const extent = geometry.Extent2D(f32) {
+        while (vertical_i < vertical_count) : (vertical_i += 1) {
+            const extent = geometry.Extent2D(f32){
                 .x = x_begin + (stride_horizonal * @as(f32, @floatFromInt(horizonal_i))),
                 .y = y_begin + (stride_vertical * @as(f32, @floatFromInt(vertical_i))),
                 .width = @as(f32, @floatFromInt(dimensions_pixels.width)) / @as(f32, @floatFromInt(screen_dimensions.width)) * 2.0,
@@ -976,7 +958,7 @@ fn draw() !void {
             };
             const face_index = horizonal_i + (vertical_i * horizonal_count);
             const texture_coordinates = iconTextureLookup(@enumFromInt(face_index % icon_path_list.len));
-            const texture_extent = geometry.Extent2D(f32) {
+            const texture_extent = geometry.Extent2D(f32){
                 .x = texture_coordinates.x,
                 .y = texture_coordinates.y,
                 .width = @as(f32, @floatFromInt(icon_dimensions.width)) / @as(f32, @floatFromInt(texture_layer_dimensions.width)),
@@ -986,7 +968,7 @@ fn draw() !void {
         }
     }
     vertex_buffer_quad_count = 1 + (horizonal_count * vertical_count);
-    if(draw_window_decorations_requested) {
+    if (draw_window_decorations_requested) {
         vertex_buffer_quad_count += 3;
     }
 }
@@ -994,7 +976,7 @@ fn draw() !void {
 fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
     try waylandSetup();
 
-    const vulkan_lib_symbol = comptime switch(builtin.os.tag) {
+    const vulkan_lib_symbol = comptime switch (builtin.os.tag) {
         .windows => "vulkan-1.dll",
         .macos => "libvulkan.1.dylib",
         .netbsd, .openbsd => "libvulkan.so",
@@ -1051,13 +1033,13 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
     errdefer app.instance_dispatch.destroySurfaceKHR(app.instance, app.surface, null);
 
     // Find a suitable physical device (GPU/APU) to use
-    // Criteria: 
+    // Criteria:
     //   1. Supports defined list of device extensions. See `device_extensions` above
     //   2. Has a graphics queue that supports presentation on our selected surface
     const best_physical_device = outer: {
         const physical_devices = blk: {
             var device_count: u32 = 0;
-            if(.success != (try app.instance_dispatch.enumeratePhysicalDevices(app.instance, &device_count, null))) {
+            if (.success != (try app.instance_dispatch.enumeratePhysicalDevices(app.instance, &device_count, null))) {
                 std.log.warn("Failed to query physical device count", .{});
                 return error.PhysicalDeviceQueryFailure;
             }
@@ -1075,12 +1057,11 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
         defer allocator.free(physical_devices);
 
         for (physical_devices, 0..) |physical_device, physical_device_i| {
-
             std.log.info("Physical vulkan devices found: {d}", .{physical_devices.len});
 
             const device_supports_extensions = blk: {
                 var extension_count: u32 = undefined;
-                if(.success != (try app.instance_dispatch.enumerateDeviceExtensionProperties(physical_device, null, &extension_count, null))) {
+                if (.success != (try app.instance_dispatch.enumerateDeviceExtensionProperties(physical_device, null, &extension_count, null))) {
                     std.log.warn("Failed to get device extension property count for physical device index {d}", .{physical_device_i});
                     continue;
                 }
@@ -1088,7 +1069,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
                 const extensions = try allocator.alloc(vk.ExtensionProperties, extension_count);
                 defer allocator.free(extensions);
 
-                if(.success != (try app.instance_dispatch.enumerateDeviceExtensionProperties(physical_device, null, &extension_count, extensions.ptr))) {
+                if (.success != (try app.instance_dispatch.enumerateDeviceExtensionProperties(physical_device, null, &extension_count, extensions.ptr))) {
                     std.log.warn("Failed to load device extension properties for physical device index {d}", .{physical_device_i});
                     continue;
                 }
@@ -1098,7 +1079,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
                         // NOTE: We are relying on device_extensions to only contain c strings up to 255 charactors
                         //       available_extension.extension_name will always be a null terminated string in a 256 char buffer
                         // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/VK_MAX_EXTENSION_NAME_SIZE.html
-                        if(std.mem.orderZ(u8, requested_extension, @as([*:0]const u8, @ptrCast(&available_extension.extension_name))) == .eq) {
+                        if (std.mem.orderZ(u8, requested_extension, @as([*:0]const u8, @ptrCast(&available_extension.extension_name))) == .eq) {
                             continue :dev_extensions;
                         }
                     }
@@ -1107,7 +1088,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
                 break :blk true;
             };
 
-            if(!device_supports_extensions) {
+            if (!device_supports_extensions) {
                 continue;
             }
 
@@ -1129,14 +1110,14 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
             std.debug.print("** Queue Families found on device **\n\n", .{});
             printVulkanQueueFamilies(queue_families[0..queue_family_count], 0);
 
-            for(queue_families[0..queue_family_count], 0..) |queue_family, queue_family_i| {
+            for (queue_families[0..queue_family_count], 0..) |queue_family, queue_family_i| {
                 if (queue_family.queue_count <= 0) {
                     continue;
                 }
                 if (queue_family.queue_flags.graphics_bit) {
                     const present_support = try app.instance_dispatch.getPhysicalDeviceSurfaceSupportKHR(
-                        physical_device, 
-                        @intCast(queue_family_i), 
+                        physical_device,
+                        @intCast(queue_family_i),
                         app.surface,
                     );
                     if (present_support != .false) {
@@ -1145,7 +1126,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
                     }
                 }
             }
-            // If we reach here, we couldn't find a suitable present_queue an will 
+            // If we reach here, we couldn't find a suitable present_queue an will
             // continue to the next device
         }
         break :outer null;
@@ -1164,11 +1145,14 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
                 .p_queue_priorities = &[1]f32{1.0},
                 .flags = .{},
             }),
-            .p_enabled_features = &vulkan_config.enabled_device_features, 
+            .p_enabled_features = &vulkan_config.enabled_device_features,
             .enabled_extension_count = device_extensions.len,
             .pp_enabled_extension_names = &device_extensions,
-            .enabled_layer_count = if (enable_validation_layers) validation_layers.len else 0,
-            .pp_enabled_layer_names = if (enable_validation_layers) &validation_layers else undefined,
+            //
+            // Not supported since Vulkan 1.0
+            //
+            .enabled_layer_count = 0,
+            .pp_enabled_layer_names = undefined,
             .flags = .{},
         };
 
@@ -1190,10 +1174,10 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
     );
 
     // Query and select appropriate surface format for swapchain
-    if(try selectSurfaceFormat(allocator, app.*, .srgb_nonlinear_khr, .b8g8r8a8_unorm)) |surface_format| {
+    if (try selectSurfaceFormat(allocator, app.*, .srgb_nonlinear_khr, .b8g8r8a8_unorm)) |surface_format| {
         app.surface_format = surface_format;
     } else {
-        return error.RequiredSurfaceFormatUnavailable;  
+        return error.RequiredSurfaceFormatUnavailable;
     }
 
     const mesh_memory_index: u32 = blk: {
@@ -1205,7 +1189,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
         //  - Device local (Memory on the GPU / APU)
 
         const memory_properties = app.instance_dispatch.getPhysicalDeviceMemoryProperties(app.physical_device);
-        if(print_vulkan_objects.memory_type_all) {
+        if (print_vulkan_objects.memory_type_all) {
             std.debug.print("\n** Memory heaps found on system **\n\n", .{});
             printVulkanMemoryHeaps(memory_properties, 0);
             std.debug.print("\n", .{});
@@ -1239,7 +1223,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
             if (memory_flags.host_visible_bit) {
                 suitable_memory_type_index_opt = memory_type_index;
                 if (memory_flags.device_local_bit) {
-                    std.log.info("Selected memory for mesh buffer: Heap index ({d}) Memory index ({d})", .{heap_index, memory_type_index});
+                    std.log.info("Selected memory for mesh buffer: Heap index ({d}) Memory index ({d})", .{ heap_index, memory_type_index });
                     break :blk memory_type_index;
                 }
             }
@@ -1265,7 +1249,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
             },
             .mip_levels = 1,
             .array_layers = 1,
-            .initial_layout = .@"undefined",
+            .initial_layout = .undefined,
             .usage = .{ .transfer_dst_bit = true, .sampled_bit = true },
             .samples = .{ .@"1_bit" = true },
             .sharing_mode = .exclusive,
@@ -1299,11 +1283,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
             .command_pool = command_pool,
             .command_buffer_count = 1,
         };
-        try app.device_dispatch.allocateCommandBuffers(
-            app.logical_device, 
-            &comment_buffer_alloc_info, 
-            @ptrCast(&command_buffer)
-        );
+        try app.device_dispatch.allocateCommandBuffers(app.logical_device, &comment_buffer_alloc_info, @ptrCast(&command_buffer));
     }
 
     try app.device_dispatch.beginCommandBuffer(command_buffer, &vk.CommandBufferBeginInfo{
@@ -1327,7 +1307,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
                 .queue_family_index_count = 0,
                 .p_queue_family_indices = undefined,
             };
-            break :blk try app.device_dispatch.createBuffer(app.logical_device, &create_buffer_info, null);            
+            break :blk try app.device_dispatch.createBuffer(app.logical_device, &create_buffer_info, null);
         };
 
         const staging_memory = blk: {
@@ -1362,7 +1342,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
                 .{
                     .src_access_mask = .{},
                     .dst_access_mask = .{ .transfer_write_bit = true },
-                    .old_layout = .@"undefined",
+                    .old_layout = .undefined,
                     .new_layout = .transfer_dst_optimal,
                     .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
                     .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
@@ -1383,40 +1363,26 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
         }
 
         const regions = [_]vk.BufferImageCopy{
-            .{ 
-                .buffer_offset = 0, 
-                .buffer_row_length = 0, 
-                .buffer_image_height = 0, 
-                .image_subresource = .{
-                    .aspect_mask = .{ .color_bit = true },
-                    .mip_level = 0,
-                    .base_array_layer = 0,
-                    .layer_count = 1,
-                }, 
-                .image_offset = .{ .x = 0, .y = 0, .z = 0 }, 
-                    .image_extent = .{
-                    .width = texture_layer_dimensions.width,
-                    .height = texture_layer_dimensions.height,
-                    .depth = 1,
-                } 
-            },
-            .{ 
-                .buffer_offset = texture_size_bytes, 
-                .buffer_row_length = 0, 
-                .buffer_image_height = 0, 
-                .image_subresource = .{
-                    .aspect_mask = .{ .color_bit = true },
-                    .mip_level = 0,
-                    .base_array_layer = 1,
-                    .layer_count = 1,
-                }, 
-                .image_offset = .{ .x = 0, .y = 0, .z = 0 }, 
-                .image_extent = .{
-                    .width = texture_layer_dimensions.width,
-                    .height = texture_layer_dimensions.height,
-                    .depth = 1,
-                }
-            },
+            .{ .buffer_offset = 0, .buffer_row_length = 0, .buffer_image_height = 0, .image_subresource = .{
+                .aspect_mask = .{ .color_bit = true },
+                .mip_level = 0,
+                .base_array_layer = 0,
+                .layer_count = 1,
+            }, .image_offset = .{ .x = 0, .y = 0, .z = 0 }, .image_extent = .{
+                .width = texture_layer_dimensions.width,
+                .height = texture_layer_dimensions.height,
+                .depth = 1,
+            } },
+            .{ .buffer_offset = texture_size_bytes, .buffer_row_length = 0, .buffer_image_height = 0, .image_subresource = .{
+                .aspect_mask = .{ .color_bit = true },
+                .mip_level = 0,
+                .base_array_layer = 1,
+                .layer_count = 1,
+            }, .image_offset = .{ .x = 0, .y = 0, .z = 0 }, .image_extent = .{
+                .width = texture_layer_dimensions.width,
+                .height = texture_layer_dimensions.height,
+                .depth = 1,
+            } },
         };
 
         _ = app.device_dispatch.cmdCopyBufferToImage(command_buffer, staging_buffer, texture_image, .transfer_dst_optimal, 2, &regions);
@@ -1429,7 +1395,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
         }
 
         // TODO: This could be done on another thread
-        for(icon_path_list, 0..) |icon_path, icon_path_i| {
+        for (icon_path_list, 0..) |icon_path, icon_path_i| {
             // TODO: Create an  arena / allocator of a fixed size that can be reused here.
             var buffer: [1024]u8 = undefined;
             var icon_image = try img.Image.fromFilePath(allocator, io, icon_path, &buffer);
@@ -1437,13 +1403,12 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
 
             const icon_type: IconType = @enumFromInt(icon_path_i);
 
-            if(icon_image.width != icon_image.width or icon_image.height != icon_image.height) {
-                std.log.err("Icon image for icon '{}' has unexpected dimensions."
-                         ++ "Icon assets may have gotten corrupted", .{icon_type});
+            if (icon_image.width != icon_image.width or icon_image.height != icon_image.height) {
+                std.log.err("Icon image for icon '{}' has unexpected dimensions." ++ "Icon assets may have gotten corrupted", .{icon_type});
                 return error.AssetIconsDimensionsMismatch;
             }
 
-            const source_pixels = switch(icon_image.pixels) {
+            const source_pixels = switch (icon_image.pixels) {
                 .rgba32 => |pixels| pixels,
                 else => {
                     std.log.err("Icon images are expected to be in rgba32. Icon '{}' may have gotten corrupted", .{icon_type});
@@ -1451,9 +1416,8 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
                 },
             };
 
-            if(source_pixels.len != (icon_image.width * icon_image.height)) {
-                std.log.err("Loaded image for icon '{}' has an unexpected number of pixels."
-                         ++ "This is a bug in the application", .{icon_type});
+            if (source_pixels.len != (icon_image.width * icon_image.height)) {
+                std.log.err("Loaded image for icon '{}' has an unexpected number of pixels." ++ "This is a bug in the application", .{icon_type});
                 return error.AssetIconsMalformed;
             }
 
@@ -1461,14 +1425,14 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
 
             const x = @as(u32, @intCast(icon_path_i)) % icon_texture_row_count;
             const y = @as(u32, @intCast(icon_path_i)) / icon_texture_row_count;
-            const dst_offset_coords = geometry.Coordinates2D(u32) {
+            const dst_offset_coords = geometry.Coordinates2D(u32){
                 .x = x * icon_dimensions.width,
                 .y = y * icon_dimensions.height,
             };
             var src_y: u32 = 0;
-            while(src_y < icon_dimensions.height) : (src_y += 1) {
+            while (src_y < icon_dimensions.height) : (src_y += 1) {
                 var src_x: u32 = 0;
-                while(src_x < icon_dimensions.width) : (src_x += 1) {
+                while (src_x < icon_dimensions.width) : (src_x += 1) {
                     const src_index = src_x + (src_y * icon_dimensions.width);
                     const dst_index = (dst_offset_coords.x + src_x) + ((dst_offset_coords.y + src_y) * texture_layer_dimensions.width);
 
@@ -1480,7 +1444,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
             }
         }
 
-        // Not sure if this is a hack, but because we multiply the texture sample by the 
+        // Not sure if this is a hack, but because we multiply the texture sample by the
         // color in the fragment shader, we need pixel in the texture that we known will return 1.0
         // Here we're setting the last pixel to 1.0, which corresponds to a texture mapping of 1.0, 1.0
         const last_index: usize = (@as(usize, @intCast(texture_layer_dimensions.width)) * texture_layer_dimensions.height) - 1;
@@ -1496,7 +1460,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
         .{
             .src_access_mask = .{},
             .dst_access_mask = .{ .shader_read_bit = true },
-            .old_layout = .@"undefined",
+            .old_layout = .undefined,
             .new_layout = .shader_read_only_optimal,
             .src_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
             .dst_queue_family_index = vk.QUEUE_FAMILY_IGNORED,
@@ -1550,13 +1514,13 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
 
     const surface_capabilities = try app.instance_dispatch.getPhysicalDeviceSurfaceCapabilitiesKHR(app.physical_device, app.surface);
 
-    if(print_vulkan_objects.surface_abilties) {
+    if (print_vulkan_objects.surface_abilties) {
         std.debug.print("** Selected surface capabilites **\n\n", .{});
         printSurfaceCapabilities(surface_capabilities, 1);
         std.debug.print("\n", .{});
     }
 
-    if(transparancy_enabled) {
+    if (transparancy_enabled) {
         // Check to see if the compositor supports transparent windows and what
         // transparency mode needs to be set when creating the swapchain
         const supported = surface_capabilities.supported_composite_alpha;
@@ -1583,13 +1547,13 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
     std.debug.assert(app.swapchain_extent.height <= surface_capabilities.max_image_extent.height);
 
     app.swapchain_min_image_count = surface_capabilities.min_image_count + 1;
-    
-    // TODO: Perhaps more flexibily should be allowed here. I'm unsure if an application is 
+
+    // TODO: Perhaps more flexibily should be allowed here. I'm unsure if an application is
     //       supposed to match the rotation of the system / monitor, but I would assume not..
     //       It is also possible that the inherit_bit_khr bit would be set in place of identity_bit_khr
-    if(surface_capabilities.current_transform.identity_bit_khr == false) {
-        std.log.err("Selected surface does not have the option to leave framebuffer image untransformed." ++ 
-                    "This is likely a vulkan bug.", .{});
+    if (surface_capabilities.current_transform.identity_bit_khr == false) {
+        std.log.err("Selected surface does not have the option to leave framebuffer image untransformed." ++
+            "This is likely a vulkan bug.", .{});
         return error.VulkanSurfaceTransformInvalid;
     }
 
@@ -1687,7 +1651,7 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
 
     {
         // We won't be reusing vertices except in making quads so we can pre-generate the entire indices buffer
-        var indices: [*] align(16)u16  = @ptrCast(@alignCast(&mapped_device_memory[indices_range_index_begin]));
+        var indices: [*]align(16) u16 = @ptrCast(@alignCast(&mapped_device_memory[indices_range_index_begin]));
 
         var j: u32 = 0;
         while (j < (indices_range_count / 6)) : (j += 1) {
@@ -1710,7 +1674,6 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
     }
 
     app.images_available = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
-    app.renders_finished = try allocator.alloc(vk.Semaphore, max_frames_in_flight);
     app.inflight_fences = try allocator.alloc(vk.Fence, max_frames_in_flight);
 
     const semaphore_create_info = vk.SemaphoreCreateInfo{
@@ -1721,12 +1684,15 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
         .flags = .{ .signaled_bit = true },
     };
 
-    var i: u32 = 0;
-    while (i < max_frames_in_flight) {
+    for (0..max_frames_in_flight) |i| {
         app.images_available[i] = try app.device_dispatch.createSemaphore(app.logical_device, &semaphore_create_info, null);
-        app.renders_finished[i] = try app.device_dispatch.createSemaphore(app.logical_device, &semaphore_create_info, null);
         app.inflight_fences[i] = try app.device_dispatch.createFence(app.logical_device, &fence_create_info, null);
-        i += 1;
+    }
+
+    app.renders_finished = try allocator.alloc(vk.Semaphore, app.swapchain_images.len);
+
+    for (0..app.swapchain_images.len) |i| {
+        app.renders_finished[i] = try app.device_dispatch.createSemaphore(app.logical_device, &semaphore_create_info, null);
     }
 
     app.vertex_shader_module = try createVertexShaderModule(app.*);
@@ -1753,7 +1719,12 @@ fn setup(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
     app.graphics_pipeline = try createGraphicsPipeline(app.*, app.pipeline_layout, app.render_pass);
     app.framebuffers = try createFramebuffers(allocator, app.*);
 
-    _ = try app.device_dispatch.waitForFences(app.logical_device, @ptrCast(&barrier_fence), .true, std.math.maxInt(u64),);
+    _ = try app.device_dispatch.waitForFences(
+        app.logical_device,
+        @ptrCast(&barrier_fence),
+        .true,
+        std.math.maxInt(u64),
+    );
     app.device_dispatch.destroyFence(app.logical_device, barrier_fence, null);
 }
 
@@ -1800,12 +1771,7 @@ const XCursor = struct {
 /// clicked one of these will be sent with the event.
 /// https://wayland-book.com/seat/pointer.html
 /// https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h
-const MouseButton = enum(c_int) {
-    left = 0x110,
-    right = 0x111,
-    middle = 0x112,
-    _
-};
+const MouseButton = enum(c_int) { left = 0x110, right = 0x111, middle = 0x112, _ };
 
 fn xdgWmBaseListener(xdg_wm_base: *xdg.WmBase, event: xdg.WmBase.Event, _: *WaylandClient) void {
     switch (event) {
@@ -1857,7 +1823,7 @@ fn frameListener(callback: *wl.Callback, event: wl.Callback.Event, client: *Wayl
 fn shmListener(shm: *wl.Shm, event: wl.Shm.Event, client: *WaylandClient) void {
     _ = client;
     _ = shm;
-    switch(event) {
+    switch (event) {
         .format => |format| {
             std.log.info("Shm foramt: {}", .{format});
         },
@@ -1889,7 +1855,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             mouse_coordinates.x = motion.surface_x.toDouble();
             mouse_coordinates.y = motion.surface_y.toDouble();
 
-            if(@as(u16, @intFromFloat(mouse_coordinates.y)) > screen_dimensions.height or @as(u16, @intFromFloat(mouse_coordinates.x)) > screen_dimensions.width) {
+            if (@as(u16, @intFromFloat(mouse_coordinates.y)) > screen_dimensions.height or @as(u16, @intFromFloat(mouse_coordinates.x)) > screen_dimensions.width) {
                 return;
             }
 
@@ -1899,7 +1865,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             const mouse_y = screen_dimensions.height - @as(u16, @intFromFloat(mouse_coordinates.y));
             const is_within_bounds = (mouse_x >= exit_button_extent.x and mouse_y >= exit_button_extent.y and mouse_x <= end_x and mouse_y <= end_y);
 
-            if(is_within_bounds and !exit_button_hovered) {
+            if (is_within_bounds and !exit_button_hovered) {
                 exit_button_background_quad[0].color = window_decorations.exit_button.color_hovered;
                 exit_button_background_quad[1].color = window_decorations.exit_button.color_hovered;
                 exit_button_background_quad[2].color = window_decorations.exit_button.color_hovered;
@@ -1908,7 +1874,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
                 exit_button_hovered = true;
             }
 
-            if(!is_within_bounds and exit_button_hovered) {
+            if (!is_within_bounds and exit_button_hovered) {
                 exit_button_background_quad[0].color = window_decorations.color;
                 exit_button_background_quad[1].color = window_decorations.color;
                 exit_button_background_quad[2].color = window_decorations.color;
@@ -1918,8 +1884,7 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             }
         },
         .button => |button| {
-
-            if(!is_mouse_in_screen) {
+            if (!is_mouse_in_screen) {
                 return;
             }
 
@@ -1927,8 +1892,8 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
             {
                 const mouse_x: u16 = @intFromFloat(mouse_coordinates.x);
                 const mouse_y: u16 = @intFromFloat(mouse_coordinates.y);
-                std.log.info("Mouse coords: {d}, {d}. Screen {d}, {d}", .{mouse_x, mouse_y, screen_dimensions.width, screen_dimensions.height});
-                if(mouse_x < 3 and mouse_y < 3) {
+                std.log.info("Mouse coords: {d}, {d}. Screen {d}, {d}", .{ mouse_x, mouse_y, screen_dimensions.width, screen_dimensions.height });
+                if (mouse_x < 3 and mouse_y < 3) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .bottom_left);
                 }
 
@@ -1936,49 +1901,49 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
                 const max_width = screen_dimensions.width - edge_threshold;
                 const max_height = screen_dimensions.height - edge_threshold;
 
-                if(mouse_x < edge_threshold and mouse_y > max_height) {
+                if (mouse_x < edge_threshold and mouse_y > max_height) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .top_left);
                     return;
                 }
 
-                if(mouse_x > max_width and mouse_y < edge_threshold) {
+                if (mouse_x > max_width and mouse_y < edge_threshold) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .bottom_right);
                     return;
                 }
 
-                if(mouse_x > max_width and mouse_y > max_height) {
+                if (mouse_x > max_width and mouse_y > max_height) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .bottom_right);
                     return;
                 }
 
-                if(mouse_x < edge_threshold) {
+                if (mouse_x < edge_threshold) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .left);
                     return;
                 }
 
-                if(mouse_x > max_width) {
+                if (mouse_x > max_width) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .right);
                     return;
                 }
 
-                if(mouse_y <= edge_threshold) {
+                if (mouse_y <= edge_threshold) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .top);
                     return;
                 }
 
-                if(mouse_y == max_height) {
+                if (mouse_y == max_height) {
                     client.xdg_toplevel.resize(client.seat, button.serial, .bottom);
                     return;
                 }
             }
 
-            if(@as(u16, @intFromFloat(mouse_coordinates.y)) > screen_dimensions.height or @as(u16, @intFromFloat(mouse_coordinates.x)) > screen_dimensions.width) {
+            if (@as(u16, @intFromFloat(mouse_coordinates.y)) > screen_dimensions.height or @as(u16, @intFromFloat(mouse_coordinates.x)) > screen_dimensions.width) {
                 return;
             }
 
-            if(draw_window_decorations_requested and mouse_button == .left) {
+            if (draw_window_decorations_requested and mouse_button == .left) {
                 // Start interactive window move if mouse coordinates are in window decorations bounds
-                if(@as(u32, @intFromFloat(mouse_coordinates.y)) <= window_decorations.height_pixels) {
+                if (@as(u32, @intFromFloat(mouse_coordinates.y)) <= window_decorations.height_pixels) {
                     client.xdg_toplevel.move(client.seat, button.serial);
                 }
                 const end_x = exit_button_extent.x + exit_button_extent.width;
@@ -1986,14 +1951,14 @@ fn pointerListener(_: *wl.Pointer, event: wl.Pointer.Event, client: *WaylandClie
                 const mouse_x: u16 = @intFromFloat(mouse_coordinates.x);
                 const mouse_y: u16 = screen_dimensions.height - @as(u16, @intFromFloat(mouse_coordinates.y));
                 const is_within_bounds = (mouse_x >= exit_button_extent.x and mouse_y >= exit_button_extent.y and mouse_x <= end_x and mouse_y <= end_y);
-                if(is_within_bounds) {
+                if (is_within_bounds) {
                     std.log.info("Close button clicked. Shutdown requested.", .{});
                     is_shutdown_requested = true;
                 }
             }
         },
         .axis => |axis| {
-            std.log.info("Mouse: axis {} {}", .{axis.axis, axis.value.toDouble()});
+            std.log.info("Mouse: axis {} {}", .{ axis.axis, axis.value.toDouble() });
         },
         .frame => |frame| {
             _ = frame;
@@ -2070,7 +2035,6 @@ fn waylandSetup() !void {
 
     if (wayland_client.display.roundtrip() != .SUCCESS) return error.RoundtripFailed;
 
-
     //
     // Load cursor theme
     //
@@ -2083,8 +2047,7 @@ fn waylandSetup() !void {
     wayland_client.xcursor = XCursor.left_ptr;
 }
 
-fn waylandDeinit() void
-{
+fn waylandDeinit() void {
     wayland_client.cursor_surface.destroy();
     wayland_client.cursor_theme.destroy();
 
@@ -2105,18 +2068,38 @@ fn waylandDeinit() void
 //
 
 fn recreateSwapchain(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
-
     const recreate_swapchain_start = Io.Clock.real.now(io).toNanoseconds();
 
-    _ = try app.device_dispatch.waitForFences(
-        app.logical_device,
-        @ptrCast(&app.inflight_fences[previous_frame]),
-        .true,
-        std.math.maxInt(u64),
-    );
+    try app.device_dispatch.queueWaitIdle(app.graphics_present_queue);
 
     for (app.swapchain_image_views) |image_view| {
         app.device_dispatch.destroyImageView(app.logical_device, image_view, null);
+    }
+
+    for (0..max_frames_in_flight) |i| {
+        app.device_dispatch.destroySemaphore(app.logical_device, app.images_available[i], null);
+        app.device_dispatch.destroyFence(app.logical_device, app.inflight_fences[i], null);
+    }
+
+    for (0..app.swapchain_images.len) |i| {
+        app.device_dispatch.destroySemaphore(app.logical_device, app.renders_finished[i], null);
+    }
+
+    const semaphore_create_info = vk.SemaphoreCreateInfo{
+        .flags = .{},
+    };
+
+    const fence_create_info = vk.FenceCreateInfo{
+        .flags = .{ .signaled_bit = true },
+    };
+
+    for (0..max_frames_in_flight) |i| {
+        app.images_available[i] = try app.device_dispatch.createSemaphore(app.logical_device, &semaphore_create_info, null);
+        app.inflight_fences[i] = try app.device_dispatch.createFence(app.logical_device, &fence_create_info, null);
+    }
+
+    for (0..app.swapchain_images.len) |i| {
+        app.renders_finished[i] = try app.device_dispatch.createSemaphore(app.logical_device, &semaphore_create_info, null);
     }
 
     app.swapchain_extent.width = screen_dimensions.width;
@@ -2184,6 +2167,11 @@ fn recreateSwapchain(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext
         }
     }
 
+    //
+    // This invalidates all of our command buffers so they'll need to be recorded again
+    //
+    is_record_requested = true;
+
     const recreate_swapchain_end = Io.Clock.real.now(io).toNanoseconds();
     std.debug.assert(recreate_swapchain_end >= recreate_swapchain_start);
     const recreate_swapchain_duration = @as(u64, @intCast(recreate_swapchain_end - recreate_swapchain_start));
@@ -2214,12 +2202,7 @@ fn recordRenderPass(
     std.debug.assert(current_time >= background_color_loop_time_base);
 
     // This value should never been seen, as we draw a background quad over it
-    const clear_color = graphics.RGBA(f32){ 
-        .r = 0.0,
-        .g = 0.0,
-        .b = 0.0,
-        .a = 1.0 - transparancy_level
-    };
+    const clear_color = graphics.RGBA(f32){ .r = 0.0, .g = 0.0, .b = 0.0, .a = 1.0 - transparancy_level };
     const clear_colors = [1]vk.ClearValue{
         vk.ClearValue{
             .color = vk.ClearColorValue{
@@ -2282,28 +2265,21 @@ fn recordRenderPass(
         app.device_dispatch.cmdBindVertexBuffers(command_buffer, 0, &[1]vk.Buffer{texture_vertices_buffer}, &[1]vk.DeviceSize{0});
         app.device_dispatch.cmdBindIndexBuffer(command_buffer, texture_indices_buffer, 0, .uint16);
         app.device_dispatch.cmdBindDescriptorSets(
-            command_buffer, 
-            .graphics, 
-            app.pipeline_layout, 
-            0, 
+            command_buffer,
+            .graphics,
+            app.pipeline_layout,
+            0,
             &[1]vk.DescriptorSet{app.descriptor_sets[i]},
             &.{},
         );
-        
-        const push_constant = PushConstant {
-            .width = @floatFromInt(screen_dimensions.width),       
+
+        const push_constant = PushConstant{
+            .width = @floatFromInt(screen_dimensions.width),
             .height = @floatFromInt(screen_dimensions.height),
             .frame = @floatFromInt(frame_count),
         };
-       
-        app.device_dispatch.cmdPushConstants(
-            command_buffer, 
-            app.pipeline_layout, 
-            .{ .fragment_bit = true }, 
-            0, 
-            @sizeOf(PushConstant), 
-            &push_constant
-        );
+
+        app.device_dispatch.cmdPushConstants(command_buffer, app.pipeline_layout, .{ .fragment_bit = true }, 0, @sizeOf(PushConstant), &push_constant);
 
         app.device_dispatch.cmdDrawIndexed(command_buffer, indices_count, 1, 0, 0, 0);
 
@@ -2313,6 +2289,11 @@ fn recordRenderPass(
 }
 
 fn renderFrame(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !void {
+
+    //
+    // Wait for the oldest submitted command buffer to finish on the GPU. This means that we can record
+    // and submit them again
+    //
     _ = try app.device_dispatch.waitForFences(
         app.logical_device,
         @ptrCast(&app.inflight_fences[current_frame]),
@@ -2320,6 +2301,14 @@ fn renderFrame(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !voi
         std.math.maxInt(u64),
     );
 
+    //
+    // Vulkan will tell us which swapchain image we should draw to next (via the output image index).
+    // However, the output image may still be in use by the presentation engine and therefore not ready
+    // to be drawn to yet. As a result, we can provide a semaphore or fence (With should be unsignalled),
+    // that the driver will signal once the image is ready to be written to. In this case, we pass in a
+    // semaphore that we will pass in along with the command buffers we submit. This will tell the GPU not
+    // to execute the command buffer on the image until the semaphore has been signalled.
+    //
     const acquire_image_result = try app.device_dispatch.acquireNextImageKHR(
         app.logical_device,
         app.swapchain,
@@ -2329,29 +2318,45 @@ fn renderFrame(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !voi
     );
 
     // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/vkAcquireNextImageKHR.html
-    switch(acquire_image_result.result) {
+    switch (acquire_image_result.result) {
         .success => {},
         .error_out_of_date_khr, .suboptimal_khr => {
             try recreateSwapchain(allocator, io, app);
             return;
         },
-        .error_out_of_host_memory => { return error.VulkanHostOutOfMemory; },
-        .error_out_of_device_memory => { return error.VulkanDeviceOutOfMemory; },
-        .error_device_lost => { return error.VulkanDeviceLost; },
-        .error_surface_lost_khr => { return error.VulkanSurfaceLost; },
-        .error_full_screen_exclusive_mode_lost_ext => { return error.VulkanFullScreenExclusiveModeLost; },
-        .timeout => { return error.VulkanAcquireFramebufferImageTimeout; },
-        .not_ready => { return error.VulkanAcquireFramebufferImageNotReady; },
+        .error_out_of_host_memory => {
+            return error.VulkanHostOutOfMemory;
+        },
+        .error_out_of_device_memory => {
+            return error.VulkanDeviceOutOfMemory;
+        },
+        .error_device_lost => {
+            return error.VulkanDeviceLost;
+        },
+        .error_surface_lost_khr => {
+            return error.VulkanSurfaceLost;
+        },
+        .error_full_screen_exclusive_mode_lost_ext => {
+            return error.VulkanFullScreenExclusiveModeLost;
+        },
+        .timeout => {
+            return error.VulkanAcquireFramebufferImageTimeout;
+        },
+        .not_ready => {
+            return error.VulkanAcquireFramebufferImageNotReady;
+        },
         else => {
             return error.VulkanAcquireNextImageUnknown;
-        }
+        },
     }
+
+    try app.device_dispatch.resetFences(app.logical_device, @ptrCast(&app.inflight_fences[current_frame]));
 
     const swapchain_image_index = acquire_image_result.image_index;
 
     const wait_semaphores = [1]vk.Semaphore{app.images_available[current_frame]};
     const wait_stages = [1]vk.PipelineStageFlags{.{ .color_attachment_output_bit = true }};
-    const signal_semaphores = [1]vk.Semaphore{app.renders_finished[current_frame]};
+    const signal_semaphores = [1]vk.Semaphore{app.renders_finished[swapchain_image_index]};
 
     const command_submit_info = vk.SubmitInfo{
         .wait_semaphore_count = 1,
@@ -2363,7 +2368,6 @@ fn renderFrame(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !voi
         .p_signal_semaphores = &signal_semaphores,
     };
 
-    try app.device_dispatch.resetFences(app.logical_device, @ptrCast(&app.inflight_fences[current_frame]));
     try app.device_dispatch.queueSubmit(
         app.graphics_present_queue,
         @ptrCast(&command_submit_info),
@@ -2383,22 +2387,36 @@ fn renderFrame(allocator: std.mem.Allocator, io: Io, app: *GraphicsContext) !voi
     const present_result = try app.device_dispatch.queuePresentKHR(app.graphics_present_queue, &present_info);
 
     // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/vkQueuePresentKHR.html
-    switch(present_result) {
+    switch (present_result) {
         .success => {},
         .error_out_of_date_khr, .suboptimal_khr => {
             try recreateSwapchain(allocator, io, app);
             return;
         },
-        .error_out_of_host_memory => { return error.VulkanHostOutOfMemory; },
-        .error_out_of_device_memory => { return error.VulkanDeviceOutOfMemory; },
-        .error_device_lost => { return error.VulkanDeviceLost; },
-        .error_surface_lost_khr => { return error.VulkanSurfaceLost; },
-        .error_full_screen_exclusive_mode_lost_ext => { return error.VulkanFullScreenExclusiveModeLost; },
-        .timeout => { return error.VulkanAcquireFramebufferImageTimeout; },
-        .not_ready => { return error.VulkanAcquireFramebufferImageNotReady; },
+        .error_out_of_host_memory => {
+            return error.VulkanHostOutOfMemory;
+        },
+        .error_out_of_device_memory => {
+            return error.VulkanDeviceOutOfMemory;
+        },
+        .error_device_lost => {
+            return error.VulkanDeviceLost;
+        },
+        .error_surface_lost_khr => {
+            return error.VulkanSurfaceLost;
+        },
+        .error_full_screen_exclusive_mode_lost_ext => {
+            return error.VulkanFullScreenExclusiveModeLost;
+        },
+        .timeout => {
+            return error.VulkanAcquireFramebufferImageTimeout;
+        },
+        .not_ready => {
+            return error.VulkanAcquireFramebufferImageNotReady;
+        },
         else => {
             return error.VulkanQueuePresentUnknown;
-        }
+        },
     }
 
     previous_frame = current_frame;
@@ -2441,7 +2459,7 @@ fn createRenderPass(app: GraphicsContext) !vk.RenderPass {
                 .store_op = .store,
                 .stencil_load_op = .dont_care,
                 .stencil_store_op = .dont_care,
-                .initial_layout = .@"undefined",
+                .initial_layout = .undefined,
                 .final_layout = .present_src_khr,
                 .flags = .{},
             },
@@ -2486,11 +2504,11 @@ fn createDescriptorPool(app: GraphicsContext) !vk.DescriptorPool {
     const image_count: u32 = @intCast(app.swapchain_image_views.len);
     const descriptor_pool_sizes = [_]vk.DescriptorPoolSize{
         .{
-            .@"type" = .sampler,
+            .type = .combined_image_sampler,
             .descriptor_count = image_count,
         },
         .{
-            .@"type" = .sampled_image,
+            .type = .sampled_image,
             .descriptor_count = image_count,
         },
     };
@@ -2518,11 +2536,7 @@ fn createDescriptorSetLayouts(allocator: std.mem.Allocator, app: GraphicsContext
             .p_bindings = @ptrCast(&descriptor_set_layout_bindings[0]),
             .flags = .{},
         };
-        descriptor_set_layouts[0] = try app.device_dispatch.createDescriptorSetLayout(
-            app.logical_device, 
-            &descriptor_set_layout_create_info, 
-            null
-        );
+        descriptor_set_layouts[0] = try app.device_dispatch.createDescriptorSetLayout(app.logical_device, &descriptor_set_layout_create_info, null);
 
         // We can copy the same descriptor set layout for each swapchain image
         var x: u32 = 1;
@@ -2533,11 +2547,7 @@ fn createDescriptorSetLayouts(allocator: std.mem.Allocator, app: GraphicsContext
     return descriptor_set_layouts;
 }
 
-fn createDescriptorSets(
-    allocator: std.mem.Allocator, 
-    app: *GraphicsContext,
-    descriptor_set_layouts: []vk.DescriptorSetLayout
-) ![]vk.DescriptorSet {
+fn createDescriptorSets(allocator: std.mem.Allocator, app: *GraphicsContext, descriptor_set_layouts: []vk.DescriptorSetLayout) ![]vk.DescriptorSet {
     const swapchain_image_count: u32 = @intCast(app.swapchain_image_views.len);
 
     // 1. Allocate DescriptorSets from DescriptorPool
@@ -2548,11 +2558,7 @@ fn createDescriptorSets(
             .descriptor_set_count = swapchain_image_count,
             .p_set_layouts = descriptor_set_layouts.ptr,
         };
-        try app.device_dispatch.allocateDescriptorSets(
-            app.logical_device, 
-            &descriptor_set_allocator_info, 
-            @ptrCast(descriptor_sets.ptr)
-        );
+        try app.device_dispatch.allocateDescriptorSets(app.logical_device, &descriptor_set_allocator_info, @ptrCast(descriptor_sets.ptr));
     }
 
     // 2. Create Sampler that will be written to DescriptorSet
@@ -2602,7 +2608,7 @@ fn createDescriptorSets(
 }
 
 fn createPipelineLayout(app: GraphicsContext, descriptor_set_layouts: []vk.DescriptorSetLayout) !vk.PipelineLayout {
-    const push_constant = vk.PushConstantRange {
+    const push_constant = vk.PushConstantRange{
         .stage_flags = .{ .fragment_bit = true },
         .offset = 0,
         .size = @sizeOf(PushConstant),
@@ -2617,11 +2623,7 @@ fn createPipelineLayout(app: GraphicsContext, descriptor_set_layouts: []vk.Descr
     return try app.device_dispatch.createPipelineLayout(app.logical_device, &pipeline_layout_create_info, null);
 }
 
-fn createGraphicsPipeline(
-    app: GraphicsContext, 
-    pipeline_layout: vk.PipelineLayout, 
-    render_pass: vk.RenderPass
-) !vk.Pipeline {
+fn createGraphicsPipeline(app: GraphicsContext, pipeline_layout: vk.PipelineLayout, render_pass: vk.RenderPass) !vk.Pipeline {
     const vertex_input_attribute_descriptions = [_]vk.VertexInputAttributeDescription{
         vk.VertexInputAttributeDescription{ // inPosition
             .binding = 0,
@@ -2742,7 +2744,7 @@ fn createGraphicsPipeline(
 
     const color_blend_attachment = vk.PipelineColorBlendAttachmentState{
         .color_write_mask = .{ .r_bit = true, .g_bit = true, .b_bit = true, .a_bit = true },
-        .blend_enable = if(enable_blending) .true else .false,
+        .blend_enable = if (enable_blending) .true else .false,
         .alpha_blend_op = .add,
         .color_blend_op = .add,
         .dst_alpha_blend_factor = .one,
@@ -2762,7 +2764,7 @@ fn createGraphicsPipeline(
     };
 
     const dynamic_states = [_]vk.DynamicState{ .viewport, .scissor };
-    const dynamic_state_create_info = vk.PipelineDynamicStateCreateInfo {
+    const dynamic_state_create_info = vk.PipelineDynamicStateCreateInfo{
         .dynamic_state_count = 2,
         .p_dynamic_states = @ptrCast(&dynamic_states),
         .flags = .{},
@@ -2791,13 +2793,7 @@ fn createGraphicsPipeline(
     };
 
     var graphics_pipeline: vk.Pipeline = undefined;
-    _ = try app.device_dispatch.createGraphicsPipelines(
-        app.logical_device, 
-        .null_handle, 
-        &pipeline_create_infos, 
-        null, 
-        @ptrCast(&graphics_pipeline)
-    );
+    _ = try app.device_dispatch.createGraphicsPipelines(app.logical_device, .null_handle, &pipeline_create_infos, null, @ptrCast(&graphics_pipeline));
 
     return graphics_pipeline;
 }
@@ -2817,7 +2813,7 @@ fn createFramebuffers(allocator: std.mem.Allocator, app: GraphicsContext) ![]vk.
     var framebuffers = try allocator.alloc(vk.Framebuffer, app.swapchain_image_views.len);
     var i: u32 = 0;
     while (i < app.swapchain_image_views.len) : (i += 1) {
-        // We reuse framebuffer_create_info for each framebuffer we create, 
+        // We reuse framebuffer_create_info for each framebuffer we create,
         // we only need to update the swapchain_image_view that is attached
         framebuffer_create_info.p_attachments = @ptrCast(&app.swapchain_image_views[i]);
         framebuffers[i] = try app.device_dispatch.createFramebuffer(app.logical_device, &framebuffer_create_info, null);
@@ -2848,9 +2844,9 @@ fn createVertexShaderModule(app: GraphicsContext) !vk.ShaderModule {
 }
 
 fn selectSurfaceFormat(
-    allocator: std.mem.Allocator, 
-    app: GraphicsContext, 
-    color_space: vk.ColorSpaceKHR, 
+    allocator: std.mem.Allocator,
+    app: GraphicsContext,
+    color_space: vk.ColorSpaceKHR,
     surface_format: vk.Format,
 ) !?vk.SurfaceFormatKHR {
     var format_count: u32 = undefined;
@@ -2858,7 +2854,7 @@ fn selectSurfaceFormat(
         return error.FailedToGetSurfaceFormats;
     }
 
-    if(format_count == 0) {
+    if (format_count == 0) {
         // NOTE: This should not happen. As per spec:
         //       "The number of format pairs supported must be greater than or equal to 1"
         // https://www.khronos.org/registry/vulkan/specs/1.3-extensions/man/html/vkGetPhysicalDeviceSurfaceFormatsKHR.html
@@ -2873,12 +2869,12 @@ fn selectSurfaceFormat(
         return error.FailedToGetSurfaceFormats;
     }
 
-    for(formats) |format| {
-        if(format.format == surface_format and format.color_space == color_space) {
+    for (formats) |format| {
+        if (format.format == surface_format and format.color_space == color_space) {
             return format;
         }
     }
-    return null;     
+    return null;
 }
 
 //
@@ -2886,7 +2882,6 @@ fn selectSurfaceFormat(
 //
 
 fn printVulkanMemoryHeap(memory_properties: vk.PhysicalDeviceMemoryProperties, heap_index: u32, comptime indent_level: u32) void {
-
     const heap_count: u32 = memory_properties.memory_heap_count;
     std.debug.assert(heap_index <= heap_count);
     const base_indent = "  " ** indent_level;
@@ -2904,7 +2899,7 @@ fn printVulkanMemoryHeap(memory_properties: vk.PhysicalDeviceMemoryProperties, h
 
     var memory_type_i: u32 = 0;
     while (memory_type_i < memory_type_count) : (memory_type_i += 1) {
-        if(memory_properties.memory_types[memory_type_i].heap_index == heap_index) {
+        if (memory_properties.memory_types[memory_type_i].heap_index == heap_index) {
             print(base_indent ++ "    Memory Index #{}\n", .{memory_type_i});
             const memory_flags = memory_properties.memory_types[memory_type_i].property_flags;
             print(base_indent ++ "      Device Local:     {}\n", .{memory_flags.device_local_bit});
@@ -2928,7 +2923,7 @@ fn printVulkanMemoryHeaps(memory_properties: vk.PhysicalDeviceMemoryProperties, 
 fn printVulkanQueueFamilies(queue_families: []vk.QueueFamilyProperties, comptime indent_level: u32) void {
     const print = std.debug.print;
     const base_indent = "  " ** indent_level;
-    for(queue_families, 0..) |queue_family, queue_family_i| {
+    for (queue_families, 0..) |queue_family, queue_family_i| {
         print(base_indent ++ "Queue family index #{d}\n", .{queue_family_i});
         printVulkanQueueFamily(queue_family, indent_level + 1);
     }
@@ -2992,4 +2987,3 @@ fn printSurfaceCapabilities(surface_capabilities: vk.SurfaceCapabilitiesKHR, com
 fn lerp(from: f32, to: f32, value: f32) f32 {
     return from + (value * (to - from));
 }
-
