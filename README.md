@@ -31,7 +31,7 @@ Additionally, feature requests, questions and discussions are in scope for the p
 
 ## Requirements 
 
-- [zig](https://github.com/ziglang/zig) (Tested with 0.12.0-dev.3180)
+- [zig](https://github.com/ziglang/zig) (Tested with 0.16.0)
 - Wayland system (mutter, river, sway, etc)
 - libwayland-client
 - libwayland-cursor
